@@ -37,6 +37,39 @@ describe("inactive account quotas", () => {
       resetCredits: { availableCount: 2 },
     });
   });
+  it("marks a rejected refresh grant unusable and never fabricates quota for it", async () => {
+    const { store } = await setup();
+    await store.install(credential("a"));
+    await store.captureCurrent();
+    const b = await store.save(credential("b", 1, 1)); // access token already expired
+    let rejectRefresh = true;
+    const quotas = new NativeAccountQuotas({
+      directory: store.directory,
+      credentials: store,
+      fetch: async (input) => {
+        if (String(input).endsWith("/oauth/token")) {
+          if (rejectRefresh) return new Response("{}", { status: 400 });
+          const oauth = credential("b", 2).managedOAuthCredential();
+          return Response.json({ access_token: oauth.accessToken });
+        }
+        return Response.json({
+          rate_limit: { primary_window: { used_percent: 20, limit_window_seconds: 18000 } },
+        });
+      },
+    });
+    const account = store.vault.accounts.find((entry) => entry.accountId === b);
+    if (!account) throw new Error("Missing fixture Account");
+    expect(quotas.credentialUsable(b)).toBe(true);
+    await expect(quotas.inspect(account, true)).rejects.toMatchObject({ code: "unavailable" });
+    expect(quotas.credentialUsable(b)).toBe(false);
+    expect(quotas.get(b)).toBeNull();
+    // A later successful read (for example after a native re-login) lifts the quarantine.
+    rejectRefresh = false;
+    await expect(quotas.inspect(account, true)).resolves.toMatchObject({
+      accountCredits: { usedPercent: 20 },
+    });
+    expect(quotas.credentialUsable(b)).toBe(true);
+  });
   it("refreshes only B's saved grant without overwriting C or permanent auth", async () => {
     const { store, runtime } = await setup();
     await store.install(credential("a"));
