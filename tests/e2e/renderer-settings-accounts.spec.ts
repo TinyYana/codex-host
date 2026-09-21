@@ -18,23 +18,36 @@ const { outputFiles } = await build({
 
       globalThis.setupAccounts = ({ locale = "zh-CN", theme = "dark", scenario = "normal" } = {}) => {
         document.documentElement.style.colorScheme = theme;
-        const accounts = [
+        const managed = scenario === "managed";
+        let accounts = [
           { accountId:"native",label:"Native",email:"zhaobin_jiang@163.com",planType:"pro" },
+          ...(managed ? [
+            { accountId:"spare",label:"Spare",email:"spare@example.com",planType:"plus",saved:true },
+            { accountId:"stale",label:"Stale",email:"stale@example.com",saved:true,requiresLogin:true },
+          ] : []),
         ];
+        let currentAccountId = "native";
+        let revision = 1;
+        let auto = { enabled:false, strategy:"best" };
         const accountSnapshot = () => ({
-          version:2,currentAccountId:"native",phase:"ready",revision:1,instanceId:"settings-host",
+          version:2,currentAccountId,phase:"ready",revision,instanceId:"settings-host",
+          ...(managed ? { capabilities:{manage:true,saveCurrent:true,switch:true,delete:true}, auto } : {}),
           accounts,
         });
         const snapshots = {
           native: { usedPercent:9,periodType:"seven_day",resetsAt:"2026-09-13T13:16:00Z",resetCredits:{availableCount:2,nextExpiresAt:"2026-10-04T01:54:00Z",expiresAt:["2026-10-04T01:54:00Z","2026-10-08T01:54:00Z"]} },
+          spare: { usedPercent:40,periodType:"five_hour",resetsAt:"2026-09-10T11:20:00Z",productUsage:[{product:"7-day window",usagePercent:20,resetsAt:"2026-09-15T08:20:00Z"}] },
         };
+        // Mutations answer only when the test releases them, so pending UI is observable.
+        let releaseSwitch = () => {};
+        const changed = () => { revision += 1; return accountSnapshot(); };
         let harnessAccounts = [
           {harnessId:"grok",harnessName:"Grok Build",email:"grok@example.com",credits:{usedPercent:0,periodType:"weekly",resetsAt:"2026-09-17T03:32:00Z"}},
           {harnessId:"antigravity",harnessName:"Antigravity",credits:{label:"Gemini Models · Weekly window",usedPercent:10,periodType:"weekly"}},
           {harnessId:"claude-code",harnessName:"Claude Code",email:"claude@example.com",plan:"max",credits:{usedPercent:0,periodType:"five_hour",productUsage:[{product:"7-day window",usagePercent:50}]}},
         ];
         let failUsage = scenario === "error";
-        const calls = { inspect:[], imports:[] };
+        const calls = { inspect:[], imports:[], manage:[] };
         const sources = [
           {id:"codex:fixture",harnessId:"codex",provider:"openai-codex",label:"zhaobin_jiang@163.com"},
           {id:"grok:fixture",harnessId:"grok",provider:"xai",label:"grok@example.com"},
@@ -50,6 +63,35 @@ const { outputFiles } = await build({
           ...(scenario === "external" ? {listHarnessAccounts: async () => ({accounts:harnessAccounts})} : {}),
           listCodexAccounts: async () => accountSnapshot(),
           refreshCodexAccounts: async () => accountSnapshot(),
+          ...(managed ? {
+            saveCurrentCodexAccount: async () => {
+              calls.manage.push(["save"]);
+              accounts = accounts.map(a => a.accountId === currentAccountId ? {...a,saved:true} : a);
+              return changed();
+            },
+            switchCodexAccount: ({accountId}) => new Promise((resolve, reject) => {
+              calls.manage.push(["switch",accountId]);
+              releaseSwitch = (failure) => {
+                if (failure) { reject(Object.assign(new Error("native detail must stay hidden"),{code:-32086,data:{code:failure}})); return; }
+                currentAccountId = accountId;
+                resolve(changed());
+              };
+            }),
+            deleteCodexAccount: async ({accountId}) => {
+              calls.manage.push(["delete",accountId]);
+              accounts = accounts.filter(a => a.accountId !== accountId);
+              return changed();
+            },
+            updateCodexAccountAuto: async (input) => {
+              calls.manage.push(["auto",input]);
+              auto = {...auto,...input};
+              return changed();
+            },
+            inspectCodexAccountRanking: async () => ({strategy:auto.strategy,recommendedAccountId:"spare",entries:[
+              {accountId:"spare",eligible:true,bindingPeriod:"five_hour",headroomPercent:60,reasons:["60% headroom on the binding five_hour window"]},
+              {accountId:"stale",eligible:false,reasons:["Credential needs a native re-login"]},
+            ]}),
+          } : {}),
           inspectCodexAccountUsage: async ({accountId}) => {
             calls.inspect.push(accountId);
             if (failUsage) throw new Error("offline");
@@ -59,6 +101,7 @@ const { outputFiles } = await build({
         globalThis.accountsFixture = {
           calls,
           recover: () => { failUsage=false; },
+          releaseSwitch: (failure) => releaseSwitch(failure),
           clearHarnessAccounts: () => { harnessAccounts=[]; },
         };
         const messages=rendererSettingsMessages(locale);
@@ -146,6 +189,12 @@ test("shows current Codex quota, reset-credit count, and no Host consume or logi
   await expect(page.locator(`${nativeRow} .settings-account-plan`)).toHaveText("Pro 20x");
   await expect(page.locator(`${nativeRow} .settings-account-reset-summary`)).toContainText("2 张");
   await expect(page.getByRole("button", { name: "添加 Codex 账号" })).toHaveCount(0);
+  // Without Host capabilities the page stays read-only: no management entry of any kind.
+  await expect(
+    page.getByRole("button", { name: /保存目前帳號|切換到|刪除已保存|修復/ }),
+  ).toHaveCount(0);
+  await expect(page.locator("[data-codex-account-auto]")).toBeHidden();
+  await expect(page.getByText("新增其他帳號")).toBeHidden();
   await expect(page.getByRole("button", { name: "登录", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "使用重置", exact: true })).toHaveCount(0);
   await page.locator(`${nativeRow} .settings-account-reset-summary`).click();
@@ -242,4 +291,102 @@ test("updates compact countdowns without requests or inventing a reset", async (
   expect(
     await page.evaluate(() => Reflect.get(globalThis, "accountsFixture").calls.inspect),
   ).toEqual(inspect);
+});
+
+test("saves, switches and removes managed Codex accounts only from the Host's answers", async ({
+  page,
+}) => {
+  await setup(page, { scenario: "managed" });
+  const row = (accountId: string) =>
+    page.locator(`tr.settings-account-row[data-account-id="${accountId}"]`).first();
+  const manageCalls = () =>
+    page.evaluate(() => Reflect.get(globalThis, "accountsFixture").calls.manage);
+
+  // Every Codex Account shows its own quota; one that needs a re-login stays unknown.
+  await expect(row("spare").locator("[data-resets-at]").first()).toBeVisible();
+  await expect(row("stale")).toContainText("需重新登入");
+  await expect(row("stale").locator(".settings-account-usage__message")).toHaveText("—");
+  expect(
+    await page.evaluate(() => Reflect.get(globalThis, "accountsFixture").calls.inspect),
+  ).toEqual(expect.arrayContaining(["native", "spare"]));
+  await expect(page.getByRole("button", { name: "切換到 stale@example.com" })).toBeDisabled();
+  await expect(page.getByText("新增其他帳號")).toBeVisible();
+  await expect(row("spare")).toContainText("建議");
+
+  // Save the current native login.
+  await expect(row("native")).toContainText("尚未保存");
+  await page.getByRole("button", { name: "保存目前帳號" }).click();
+  await expect(page.getByRole("button", { name: "保存目前帳號" })).toBeHidden();
+  await expect(row("native")).not.toContainText("尚未保存");
+
+  // A refused switch explains itself with fixed text and changes nothing.
+  await page.getByRole("button", { name: "切換到 spare@example.com" }).click();
+  await expect(page.locator(".settings-account-status").nth(1)).toContainText("正在切換帳號…");
+  await expect(row("native").locator(".settings-account-active")).toHaveText("当前");
+  await expect(row("spare").locator(".settings-account-active")).toHaveCount(0);
+  await page.evaluate(() => Reflect.get(globalThis, "accountsFixture").releaseSwitch("busy"));
+  await expect(page.locator(".settings-account-status").nth(1)).toContainText("有 Turn 正在進行");
+  await expect(page.locator("body")).not.toContainText("native detail must stay hidden");
+  await expect(row("native").locator(".settings-account-active")).toHaveText("当前");
+
+  // A verified switch moves the current mark, and only then.
+  await page.getByRole("button", { name: "切換到 spare@example.com" }).click();
+  await expect(page.getByRole("button", { name: /刪除已保存的帳號/ }).first()).toBeDisabled();
+  await expect(row("spare").locator(".settings-account-active")).toHaveCount(0);
+  await page.evaluate(() => Reflect.get(globalThis, "accountsFixture").releaseSwitch());
+  await expect(row("spare").locator(".settings-account-active")).toHaveText("当前");
+  await expect(row("native").locator(".settings-account-active")).toHaveCount(0);
+  await expect(page.locator(".settings-account-status").nth(1)).toContainText(
+    "已切換到 spare@example.com。",
+  );
+
+  // Removing a saved, non-current Account needs confirmation.
+  await expect(
+    page.getByRole("button", { name: "刪除已保存的帳號 spare@example.com" }),
+  ).toHaveCount(0);
+  await page.getByRole("button", { name: "刪除已保存的帳號 zhaobin_jiang@163.com" }).click();
+  const dialog = page.getByRole("dialog", { name: "刪除已保存的帳號 zhaobin_jiang@163.com" });
+  await expect(dialog).toContainText("原生登入不受影響");
+  await dialog.getByRole("button", { name: "取消", exact: true }).click();
+  await expect(row("native")).toHaveCount(1);
+  await page.getByRole("button", { name: "刪除已保存的帳號 zhaobin_jiang@163.com" }).click();
+  await dialog.getByRole("button", { name: "刪除", exact: true }).click();
+  await expect(row("native")).toHaveCount(0);
+  expect(await manageCalls()).toEqual([
+    ["save"],
+    ["switch", "spare"],
+    ["switch", "spare"],
+    ["delete", "native"],
+  ]);
+});
+
+test("controls Auto account selection and fits a narrow window", async ({ page }) => {
+  await setup(page, { scenario: "managed" });
+  await page.setViewportSize({ width: 700, height: 900 });
+  const auto = page.locator("[data-codex-account-auto]");
+  await expect(auto).toContainText("在 Turn 之間，自動換到額度最合適的已保存帳號。");
+  const toggle = auto.getByRole("switch", { name: "自動切換" });
+  await expect(toggle).not.toBeChecked();
+  await toggle.click();
+  await expect(toggle).toBeChecked();
+  await auto.getByRole("combobox", { name: "策略" }).selectOption("waste-first");
+  await expect(auto).toContainText("優先使用下次重置時會過期的額度。");
+  expect(
+    await page.evaluate(() => Reflect.get(globalThis, "accountsFixture").calls.manage),
+  ).toEqual([
+    ["auto", { enabled: true }],
+    ["auto", { strategy: "waste-first" }],
+  ]);
+  // Row actions stay inside the page at the narrow breakpoint.
+  const overflow = await page.evaluate(() => {
+    const host = document.querySelector("[data-codexhost-settings-shell]");
+    const root = host?.shadowRoot ?? document;
+    const button = [...root.querySelectorAll("button")].find((candidate) =>
+      candidate.getAttribute("aria-label")?.startsWith("切換到 spare"),
+    );
+    const content = button?.closest(".settings-account-list");
+    if (!button || !content) return null;
+    return button.getBoundingClientRect().right <= content.getBoundingClientRect().right + 1;
+  });
+  expect(overflow).toBe(true);
 });

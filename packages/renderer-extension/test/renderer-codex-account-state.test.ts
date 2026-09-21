@@ -65,6 +65,43 @@ describe("Host-scoped Codex Account state", () => {
     expect(state.readyAccountId).toBeNull();
   });
 
+  it("applies management results through the same version gate and tracks Host progress", async () => {
+    const changed = vi.fn();
+    const client = createRendererModelClient([{ sendRequest: async () => snapshot("default", 5) }]);
+    if (!client) throw new Error("Test client is unavailable");
+    const state = new RendererCodexAccountState(client, changed);
+    await state.refresh();
+    expect(state.capabilities).toBeUndefined();
+
+    // A late answer from before the latest snapshot cannot move the shown identity.
+    expect(state.apply({ ...snapshot("other", 4), accounts: [account("other")] })).toBe(false);
+    expect(state.readyAccountId).toBe("default");
+    expect(changed).not.toHaveBeenCalled();
+
+    const capabilities = { manage: true, saveCurrent: true, switch: true, delete: true };
+    expect(
+      state.apply({
+        ...snapshot("default", 6),
+        phase: "changing",
+        pendingOperation: { operationId: "op-1", kind: "switch" },
+        capabilities,
+        auto: { enabled: true, strategy: "best" },
+      }),
+    ).toBe(true);
+    expect(changed).toHaveBeenCalledOnce();
+    expect(state.switching).toBe(true);
+    expect(state.changing).toBe(true);
+    // No Account is presented as verified while the Host is changing it.
+    expect(state.readyAccountId).toBeNull();
+    expect(state.capabilities).toEqual(capabilities);
+    expect(state.auto).toEqual({ enabled: true, strategy: "best" });
+
+    state.apply({ ...snapshot("default", 7), capabilities });
+    expect(state.switching).toBe(false);
+    expect(state.changing).toBe(false);
+    expect(state.auto).toBeUndefined();
+  });
+
   it("rejects stale revisions within an epoch but accepts a fresh Host epoch", () => {
     expect(
       shouldApplyCodexAccountSnapshot(

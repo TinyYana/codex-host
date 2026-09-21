@@ -12,9 +12,15 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  CODEX_ACCOUNT_AUTO_UPDATE_METHOD,
   CODEX_ACCOUNT_CHANGED_METHOD,
+  CODEX_ACCOUNT_DELETE_METHOD,
   CODEX_ACCOUNT_LIST_METHOD,
+  CODEX_ACCOUNT_RANKING_INSPECT_METHOD,
+  CODEX_ACCOUNT_RECOVER_METHOD,
   CODEX_ACCOUNT_REFRESH_METHOD,
+  CODEX_ACCOUNT_SAVE_CURRENT_METHOD,
+  CODEX_ACCOUNT_SWITCH_METHOD,
   HARNESS_ACCOUNT_INSPECT_METHOD,
   HARNESS_ACCOUNT_SOURCES_METHOD,
   HARNESS_INSPECT_METHOD,
@@ -176,6 +182,100 @@ describe("Renderer fixed Model request client", () => {
     expect(remove).toHaveBeenCalledTimes(2);
   });
 
+  it("sends fixed Account management methods and validates the returned list and ranking", async () => {
+    const managed = {
+      version: 2 as const,
+      currentAccountId: "work",
+      phase: "ready" as const,
+      revision: 5,
+      instanceId: "host-a",
+      capabilities: { manage: true, saveCurrent: true, switch: true, delete: true },
+      auto: { enabled: false, strategy: "best" as const },
+      accounts: [
+        { accountId: "work", label: "Work", saved: true },
+        { accountId: "home", label: "Home", saved: true, requiresLogin: true },
+      ],
+    };
+    const ranking = {
+      strategy: "best" as const,
+      recommendedAccountId: "work",
+      entries: [
+        {
+          accountId: "work",
+          eligible: true,
+          bindingPeriod: "seven_day" as const,
+          headroomPercent: 62,
+          reasons: ["62% headroom on the binding seven_day window"],
+        },
+        { accountId: "home", eligible: false, reasons: ["Credential needs a native re-login"] },
+      ],
+    };
+    const sendRequest = vi.fn(async (method: string) =>
+      method === CODEX_ACCOUNT_RANKING_INSPECT_METHOD ? ranking : managed,
+    );
+    const client = createRendererModelClient([{ sendRequest }]);
+    if (!client) throw new Error("Synthetic Account client was not created");
+
+    await expect(client.saveCurrentCodexAccount?.()).resolves.toEqual(managed);
+    await expect(client.switchCodexAccount?.({ accountId: "home" })).resolves.toEqual(managed);
+    await expect(client.deleteCodexAccount?.({ accountId: "home" })).resolves.toEqual(managed);
+    await expect(client.recoverCodexAccounts?.()).resolves.toEqual(managed);
+    await expect(client.updateCodexAccountAuto?.({ strategy: "waste-first" })).resolves.toEqual(
+      managed,
+    );
+    await expect(client.inspectCodexAccountRanking?.()).resolves.toEqual(ranking);
+    await expect(client.inspectCodexAccountRanking?.({ refresh: true })).resolves.toEqual(ranking);
+    expect(sendRequest.mock.calls).toEqual([
+      [CODEX_ACCOUNT_SAVE_CURRENT_METHOD, {}],
+      [CODEX_ACCOUNT_SWITCH_METHOD, { accountId: "home" }],
+      [CODEX_ACCOUNT_DELETE_METHOD, { accountId: "home" }],
+      [CODEX_ACCOUNT_RECOVER_METHOD, {}],
+      [CODEX_ACCOUNT_AUTO_UPDATE_METHOD, { strategy: "waste-first" }],
+      [CODEX_ACCOUNT_RANKING_INSPECT_METHOD, {}],
+      [CODEX_ACCOUNT_RANKING_INSPECT_METHOD, { refresh: true }],
+    ]);
+
+    // Invalid params never reach the Host; a result carrying credential material is rejected.
+    await expect(client.switchCodexAccount?.({ accountId: "../auth" })).rejects.toThrow();
+    expect(sendRequest).toHaveBeenCalledTimes(7);
+    sendRequest.mockResolvedValueOnce({
+      ...managed,
+      accounts: [{ accountId: "work", label: "Work", auth: "secret" }],
+    } as never);
+    await expect(client.saveCurrentCodexAccount?.()).rejects.toThrow();
+  });
+
+  it("reports only failed Turns, with a usage-limit hint and no error text", () => {
+    const notifications = new Map<string, (notification: unknown) => void>();
+    const addNotificationCallback = vi.fn(
+      (method: string | readonly string[], callback: (notification: unknown) => void) => {
+        if (typeof method === "string") notifications.set(method, callback);
+        return vi.fn();
+      },
+    );
+    const client = createRendererModelClient([{ addNotificationCallback, sendRequest: vi.fn() }]);
+    const listener = vi.fn();
+    client?.subscribeCodexTurnFailures?.(listener);
+    const notify = (turn: unknown): void =>
+      notifications.get(TURN_COMPLETED_METHOD)?.({
+        method: TURN_COMPLETED_METHOD,
+        params: { threadId: "thread-1", turn },
+      });
+    notify({ id: "t1", status: "completed", error: null });
+    notify({ id: "t2", status: "interrupted", error: null });
+    expect(listener).not.toHaveBeenCalled();
+    notify({
+      id: "t3",
+      status: "failed",
+      error: { message: "raw upstream text", codexErrorInfo: "usageLimitExceeded" },
+    });
+    notify({ id: "t4", status: "failed", error: { message: "boom", codexErrorInfo: "other" } });
+    expect(listener.mock.calls).toEqual([
+      [{ threadId: "thread-1", usageLimit: true }],
+      [{ threadId: "thread-1", usageLimit: false }],
+    ]);
+  });
+
   it("reads and validates progressive read-only accounts from the bound Host", async () => {
     const account = {
       harnessId: "sample-agent",
@@ -327,10 +427,12 @@ describe("Renderer fixed Model request client", () => {
     expect(Object.keys(client).sort()).toEqual([
       "checkUpdate",
       "credentialImports",
+      "deleteCodexAccount",
       "executeThreadCommand",
       "forkThread",
       "getHarnessLaunchSettings",
       "importHarnessSession",
+      "inspectCodexAccountRanking",
       "inspectCodexAccountUsage",
       "inspectHarness",
       "inspectHarnessAccount",
@@ -348,7 +450,9 @@ describe("Renderer fixed Model request client", () => {
       "listThreadOwnership",
       "openHarnessWebUi",
       "readUpdateStatus",
+      "recoverCodexAccounts",
       "refreshCodexAccounts",
+      "saveCurrentCodexAccount",
       "selectThreadModel",
       "selectThreadPermissionMode",
       "selectThreadThinking",
@@ -356,7 +460,10 @@ describe("Renderer fixed Model request client", () => {
       "setIdleReleaseSettings",
       "startUpdate",
       "subscribeCodexAccounts",
+      "subscribeCodexTurnFailures",
       "subscribeThreadUsage",
+      "switchCodexAccount",
+      "updateCodexAccountAuto",
     ]);
 
     await expect(client.inspectHarness({ harnessId: piHarnessId, refresh: true })).resolves.toEqual(

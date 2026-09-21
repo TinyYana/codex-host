@@ -1,8 +1,22 @@
 # 账号与额度设置
 
-在 codexhost 的「设置 → 账号」查看当前 Codex 身份与额度，以及其他 Harness 的 `inspectAccount()` 快照。CodexHost 不管理多个原生 Codex 登录：不提供添加/登录/切换/退出/删除/恢复，也不消耗重置卡。官方 Desktop 登录与退出仍由官方后端处理。用户可以显式确认，将兼容的本地授权一次性复制到 Pi 的独立 Provider 配置；这是对原先全页只读边界的有限扩展，不建立 Host 凭据库，也不改变原生登录。
+在 codexhost 的「设置 → 账号」查看当前 Codex 身份与额度，以及其他 Harness 的 `inspectAccount()` 快照。CodexHost 可以保存多個 Codex 帳號並在其間安全切換（見下方「Codex 帳號管理」與 [Codex 多帳號、額度 Ranking 與安全切換](codex-managed-accounts.md)）；它不自己做登入/登出，也不消耗重置卡。官方 Desktop 登录与退出仍由官方后端处理。用户可以显式确认，将兼容的本地授权一次性复制到 Pi 的独立 Provider 配置；这是对原先全页只读边界的有限扩展，不建立 Host 凭据库，也不改变原生登录。
 
-本地 `.codexhost-native-accounts` 文件若仍存在，启动和刷新都不会读取、改写或回收。
+`.codexhost-native-accounts` 是已保存帳號的 vault：不存在時 Host 不會建立它，也不做任何 credential 儲存檢查，直到使用者第一次保存帳號；舊版留下的 vault 會在啟動時被讀取，之前保存的帳號會重新出現。
+
+## Codex 帳號管理
+
+管理動作全部由 Host 回報的 `capabilities` 決定；列表沒有 `capabilities`（SSH 遠端、不支援的儲存、舊 Host）時，頁面與唯讀版本完全相同，不顯示任何管理元素。
+
+- **保存目前帳號**：目前登入但尚未保存的帳號顯示「尚未保存」徽章，標題右側提供「保存目前帳號」。新增其他帳號的方式（先用官方登入另一個帳號，再回來保存）放在標題下方的引導浮窗。
+- **切換／刪除**：已保存且不是目前的帳號提供「切換」「刪除」；刪除前需確認，只移除保存的副本。`requiresLogin` 的帳號顯示「需重新登入」、額度顯示「—」、不可切換。
+- **每個帳號各自的額度**：每列獨立載入自己的 5 小時／7 天額度與重置時間，兩個帳號可以並排比較；查不到就是「—」，不補 0。
+- **進行中狀態**：`phase` 為 `changing`、有 `pendingOperation` 或本地請求進行中時，顯示進行中文案並停用所有動作與額度刷新。「當前」標記只在 Host 回傳的列表通過版本閘之後才移動，不做樂觀更新；成功訊息顯示的是 Host 驗證後的帳號。
+- **錯誤**：依 Host 的封閉類別碼顯示在地化文案（例如有 Turn 進行中、偵測到其他 Codex 行程使用同一個 home），不顯示原始錯誤。
+- **Manual / Auto**：Host 回報 `auto` 時顯示 Auto 開關與策略（best／consume-first／waste-first，各附一行說明）。說明文字寫明 Auto 只換 Codex 帳號、不改 Agent／Model／推理設定，且只在 Turn 之間切換。帳號列以次要文字顯示 Ranker 的結論（例如「建議 · 5 小時 · 剩餘 60%」），理由放在 tooltip；額度未知的帳號顯示「不會被自動選中」。
+- **修復**：切換的 rollback 也失敗時，Host 回報 `recover`，頁面提供「修復」。
+
+Composer 旁的額度浮窗在 Agent 為 Codex 且 Host 可管理帳號時多一個「Codex 帳號」區塊：目前身分、最緊的限制（binding window 與剩餘百分比）、其他已保存帳號的「切換」與 Auto 開關，忙碌或失敗時顯示原因。切換期間停用送出。Turn 因額度撞牆失敗、且有其他合格帳號時，浮窗提供「切換到 X 並重試」：先切換，Host 驗證後才把原輸入放回輸入框，由使用者自己確認送出——沒有任何自動送出的路徑；判斷不確定時只提供手動切換。
 
 ## 账号列表
 
@@ -51,7 +65,7 @@
 
 ## 官方认证
 
-Desktop `account/login/*` 和 `account/logout` 原样交给官方后端。Host 不建立凭据收藏库；仅用户确认的导入写入目标 Harness 自己的存储。不替换 loginId，不重建原生结果。官方认证完成后，设置页可更新当前身份与额度展示。
+Desktop `account/login/*` 和 `account/logout` 原样交给官方后端。Host 只在使用者明確保存或切換時把 credential 存進 vault，不被動收集新身分；用户确认的导入写入目标 Harness 自己的存储。不替换 loginId，不重建原生结果。官方认证完成后，设置页可更新当前身份与额度展示。
 
 SSH 维持远端原生单账号，不传输本地凭据。
 
@@ -63,9 +77,11 @@ SSH 维持远端原生单账号，不传输本地凭据。
 
 ## 实现与验证
 
-- `docs/product/codex-native-account-switching-design.md`：多账号能力已删除后的只读额度边界。
-- `openspec/changes/remove-codex-multi-account/`：删除 Host 多账号管理的产品契约。
-- `packages/host-runtime/src/account/codex-account-control.ts`：当前官方身份的只读投影。
+- `docs/product/codex-managed-accounts.md`：多帳號保存、切換交易、額度、Ranker、Auto、migration。
+- `openspec/changes/add-codex-managed-accounts/`：現行產品契約（取代 `remove-codex-multi-account`）。
+- `packages/host-runtime/src/account/codex-account-control.ts`：帳號控制面介面與唯讀投影。
+- `packages/renderer-extension/src/settings/codex-account-manage.ts`、`codex-account-messages.ts`：設定頁的管理動作、Auto 控制與錯誤文案。
+- `packages/renderer-extension/src/renderer-codex-account-switch.ts`、`renderer-codex-account-section.ts`、`renderer-codex-turn-failure.ts`：Composer 切換入口與 Switch & Retry。
 - `packages/host-runtime/src/native-account-host.ts`：本地当前身份读取。
 - `packages/host-runtime/src/native-account-observer.ts`：原生认证后更新显示身份，不收藏凭据。
 - `packages/renderer-extension/src/settings/accounts-page.ts`：身份、额度与手动导入入口。

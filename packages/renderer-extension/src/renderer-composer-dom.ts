@@ -32,6 +32,7 @@ import {
   type RendererPermissionModeControlView,
   type RendererPermissionModePickerControl,
 } from "./renderer-permission-mode-picker.js";
+import type { RendererCodexAccountSwitchView } from "./renderer-codex-account-switch.js";
 import {
   mountRendererCreditsControl,
   renderRendererCreditsControl,
@@ -689,6 +690,7 @@ export function renderComposerAgentControl(
   locale: RendererSettingsLocale = "en",
   currentCodexAccount: CodexAccountSummary | null = null,
   ownershipError = false,
+  codexAccountSwitch: RendererCodexAccountSwitchView | null = null,
 ): void {
   if (control.usage === null) {
     control.usage = mountRendererUsageControl(control.composerId, locale);
@@ -762,7 +764,12 @@ export function renderComposerAgentControl(
   control.harnessCommands.root.hidden = state.agent === "codex";
   control.harnessCommands.root.style.display = state.agent === "codex" ? "none" : "inline-flex";
   if (state.agent === "codex") control.harnessCommands.close();
-  renderRendererCreditsControl(control.credits, accountCredits, locale);
+  renderRendererCreditsControl(
+    control.credits,
+    accountCredits,
+    locale,
+    state.agent === "codex" && !ownershipError ? codexAccountSwitch : null,
+  );
 }
 
 export function disposeComposerAgentControl(control: ComposerAgentControl): void {

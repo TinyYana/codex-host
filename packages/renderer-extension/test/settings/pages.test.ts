@@ -1142,6 +1142,307 @@ describe("Renderer Codex Accounts page", () => {
   });
 });
 
+describe("Renderer Codex Account management", () => {
+  const work = { accountId: "work", label: "Work", email: "work@example.com", saved: true };
+  const home = { accountId: "home", label: "Home", email: "home@example.com", saved: true };
+  const allCapabilities = { manage: true, saveCurrent: true, switch: true, delete: true };
+  const managed = (
+    currentAccountId: string,
+    revision: number,
+    extra: Partial<CodexAccountListResult> = {},
+  ): CodexAccountListResult => ({
+    version: 2,
+    currentAccountId,
+    phase: "ready",
+    revision,
+    instanceId: "settings-host",
+    capabilities: allCapabilities,
+    accounts: [work, home],
+    ...extra,
+  });
+  const mountAccounts = (client: Record<string, unknown>, locale: "en" | "zh-CN" = "en") => {
+    const page = createDefaultRendererSettingsPages(
+      rendererSettingsMessages(locale),
+      () => null,
+      () => null,
+      () => client as never,
+    ).find(({ id }) => id === "accounts");
+    if (!page) throw new Error("Accounts page is not registered");
+    const document = new FakeDocument();
+    const content = document.createElement("main");
+    const scope = new RendererSettingsPageScope();
+    page.mount({
+      content: content as unknown as HTMLElement,
+      signal: scope.signal,
+      runLatest: (operation, handlers) => scope.runLatest(operation, handlers),
+    });
+    return { content, scope };
+  };
+  const buttons = (root: FakeElement): FakeElement[] =>
+    descendants(root).filter(({ tagName, hidden }) => tagName === "button" && !hidden);
+  const rowOf = (content: FakeElement, accountId: string): FakeElement => {
+    const row = descendants(content).find(
+      (element) => element.tagName === "tr" && element.dataset.accountId === accountId,
+    );
+    if (!row) throw new Error(`Missing row ${accountId}`);
+    return row;
+  };
+  const rowButton = (content: FakeElement, accountId: string, action: string): FakeElement | null =>
+    buttons(rowOf(content, accountId)).find(
+      ({ dataset }) => dataset.accountFocus === `${accountId}:${action}`,
+    ) ?? null;
+  const isCurrent = (content: FakeElement, accountId: string): boolean =>
+    descendants(rowOf(content, accountId)).some(
+      ({ className }) => className === "settings-account-active",
+    );
+  const autoGroup = (content: FakeElement): FakeElement => {
+    const group = descendants(content).find(({ dataset }) => "codexAccountAuto" in dataset);
+    if (!group) throw new Error("Missing Auto group");
+    return group;
+  };
+
+  it("stays read-only when the Host reports no capabilities", async () => {
+    const client = {
+      listCodexAccounts: vi.fn(async () => managed("work", 1, { capabilities: undefined })),
+      switchCodexAccount: vi.fn(),
+      deleteCodexAccount: vi.fn(),
+      saveCurrentCodexAccount: vi.fn(),
+      inspectCodexAccountRanking: vi.fn(),
+    };
+    const { content, scope } = mountAccounts(client);
+    await vi.waitFor(() => expect(visibleText(content)).toContain("home@example.com"));
+    expect(buttons(content).map(({ textContent }) => textContent)).not.toEqual(
+      expect.arrayContaining(["Switch", "Remove", "Save current account", "Repair"]),
+    );
+    expect(autoGroup(content).hidden).toBe(true);
+    expect(visibleText(content)).not.toContain("Not saved");
+    expect(client.inspectCodexAccountRanking).not.toHaveBeenCalled();
+    scope.dispose();
+  });
+
+  it("gates every action on capabilities, saved state and credential health", async () => {
+    const inspectCodexAccountUsage = vi.fn(async ({ accountId }: { accountId: string }) => ({
+      accountId,
+      usage: null,
+      freshness: "live" as const,
+      observedAt: null,
+    }));
+    const client = {
+      listCodexAccounts: vi.fn(async () =>
+        managed("fresh", 1, {
+          capabilities: { ...allCapabilities, delete: false },
+          accounts: [
+            { accountId: "fresh", label: "Fresh", email: "fresh@example.com" },
+            home,
+            { ...work, requiresLogin: true },
+          ],
+        }),
+      ),
+      inspectCodexAccountUsage,
+    };
+    const { content, scope } = mountAccounts(client);
+    await vi.waitFor(() => expect(rowButton(content, "home", "switch")).not.toBeNull());
+    // The current native login is not saved yet: it can be saved, never switched to or removed.
+    expect(buttons(content).some(({ textContent }) => textContent === "Save current account")).toBe(
+      true,
+    );
+    expect(visibleText(rowOf(content, "fresh"))).toContain("Not saved");
+    expect(rowButton(content, "fresh", "switch")).toBeNull();
+    expect(rowButton(content, "home", "switch")?.disabled).toBe(false);
+    expect(rowButton(content, "home", "delete")).toBeNull();
+    // A credential that needs a native re-login is flagged, cannot be switched to, and has no
+    // quota request: unknown stays "—".
+    expect(visibleText(rowOf(content, "work"))).toContain("Sign-in needed");
+    expect(rowButton(content, "work", "switch")?.disabled).toBe(true);
+    expect(inspectCodexAccountUsage.mock.calls.map(([input]) => input.accountId).sort()).toEqual([
+      "fresh",
+      "home",
+    ]);
+    expect(visibleText(rowOf(content, "work"))).toContain("—");
+    scope.dispose();
+  });
+
+  it("shows an in-progress change and disables actions while the Host is changing", async () => {
+    const client = {
+      listCodexAccounts: vi.fn(async () =>
+        managed("work", 1, {
+          phase: "changing",
+          pendingOperation: { operationId: "op-1", kind: "switch" },
+        }),
+      ),
+      switchCodexAccount: vi.fn(),
+    };
+    const { content, scope } = mountAccounts(client, "zh-CN");
+    await vi.waitFor(() => expect(visibleText(content)).toContain("帳號變更進行中…"));
+    expect(rowButton(content, "home", "switch")?.disabled).toBe(true);
+    expect(rowButton(content, "home", "delete")?.disabled).toBe(true);
+    // While changing, no Account is presented as the verified current one.
+    expect(isCurrent(content, "work")).toBe(false);
+    rowButton(content, "home", "switch")?.dispatch("click");
+    expect(client.switchCodexAccount).not.toHaveBeenCalled();
+    scope.dispose();
+  });
+
+  it("moves the current mark only after the Host answers, and ignores a stale answer", async () => {
+    const switched = Promise.withResolvers<CodexAccountListResult>();
+    const client = {
+      listCodexAccounts: vi.fn(async () => managed("work", 4)),
+      switchCodexAccount: vi.fn(() => switched.promise),
+    };
+    const { content, scope } = mountAccounts(client);
+    await vi.waitFor(() => expect(rowButton(content, "home", "switch")).not.toBeNull());
+    rowButton(content, "home", "switch")?.dispatch("click");
+    await vi.waitFor(() =>
+      expect(client.switchCodexAccount).toHaveBeenCalledExactlyOnceWith({ accountId: "home" }),
+    );
+    expect(isCurrent(content, "work")).toBe(true);
+    expect(isCurrent(content, "home")).toBe(false);
+    expect(visibleText(content)).toContain("Switching account…");
+    expect(rowButton(content, "home", "delete")?.disabled).toBe(true);
+
+    switched.resolve(managed("home", 5));
+    await vi.waitFor(() => expect(isCurrent(content, "home")).toBe(true));
+    expect(isCurrent(content, "work")).toBe(false);
+    expect(visibleText(content)).toContain("Switched to home@example.com.");
+
+    // An older revision (for example a late answer from before the switch) changes nothing.
+    client.switchCodexAccount.mockResolvedValueOnce(managed("home", 3, { accounts: [home] }));
+    rowButton(content, "work", "switch")?.dispatch("click");
+    await vi.waitFor(() => expect(client.switchCodexAccount).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(rowButton(content, "work", "switch")?.disabled).toBe(false));
+    expect(isCurrent(content, "home")).toBe(true);
+    scope.dispose();
+  });
+
+  it("removes a saved Account only after confirmation and localizes refusals", async () => {
+    const client = {
+      listCodexAccounts: vi.fn(async () => managed("work", 1)),
+      deleteCodexAccount: vi.fn(async () => managed("work", 2, { accounts: [work] })),
+      switchCodexAccount: vi.fn(async () => {
+        throw Object.assign(new Error("raw /Users/x/.codex/auth.json"), {
+          code: -32086,
+          data: { code: "unsafe-external-process" },
+        });
+      }),
+    };
+    const { content, scope } = mountAccounts(client, "zh-CN");
+    await vi.waitFor(() => expect(rowButton(content, "home", "delete")).not.toBeNull());
+    expect(rowButton(content, "work", "delete")).toBeNull();
+
+    rowButton(content, "home", "switch")?.dispatch("click");
+    await vi.waitFor(() => expect(visibleText(content)).toContain("請先關閉它再試"));
+    expect(visibleText(content)).not.toContain("auth.json");
+
+    rowButton(content, "home", "delete")?.dispatch("click");
+    const dialog = descendants(content).find(({ tagName }) => tagName === "dialog");
+    expect(dialog?.open).toBe(true);
+    expect(client.deleteCodexAccount).not.toHaveBeenCalled();
+    const confirm = descendants(dialog as FakeElement).find(
+      ({ tagName, textContent }) => tagName === "button" && textContent === "刪除",
+    );
+    confirm?.dispatch("click");
+    await vi.waitFor(() =>
+      expect(client.deleteCodexAccount).toHaveBeenCalledExactlyOnceWith({ accountId: "home" }),
+    );
+    await vi.waitFor(() =>
+      expect(
+        descendants(content).some(
+          (element) => element.tagName === "tr" && element.dataset.accountId === "home",
+        ),
+      ).toBe(false),
+    );
+    scope.dispose();
+  });
+
+  it("offers Repair when the Host asks for recovery", async () => {
+    const client = {
+      listCodexAccounts: vi.fn(async () =>
+        managed("work", 1, {
+          phase: "unavailable",
+          capabilities: {
+            manage: true,
+            saveCurrent: false,
+            switch: false,
+            delete: false,
+            recover: true,
+            reason: "recovery-required",
+          },
+        }),
+      ),
+      recoverCodexAccounts: vi.fn(async () => managed("work", 2)),
+    };
+    const { content, scope } = mountAccounts(client);
+    await vi.waitFor(() => expect(visibleText(content)).toContain("did not finish cleanly"));
+    expect(rowButton(content, "home", "switch")).toBeNull();
+    const repair = buttons(content).find(({ dataset }) => dataset.codexAccountAction === "recover");
+    repair?.dispatch("click");
+    await vi.waitFor(() => expect(client.recoverCodexAccounts).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(rowButton(content, "home", "switch")?.disabled).toBe(false));
+    scope.dispose();
+  });
+
+  it("controls Auto from the Host's answer and explains ranking per Account", async () => {
+    const updated = Promise.withResolvers<CodexAccountListResult>();
+    const client = {
+      listCodexAccounts: vi.fn(async () =>
+        managed("work", 1, { auto: { enabled: false, strategy: "best" } }),
+      ),
+      updateCodexAccountAuto: vi.fn(() => updated.promise),
+      inspectCodexAccountRanking: vi.fn(async () => ({
+        strategy: "best" as const,
+        recommendedAccountId: "home",
+        entries: [
+          {
+            accountId: "home",
+            eligible: true,
+            bindingPeriod: "seven_day" as const,
+            headroomPercent: 80,
+            reasons: ["80% headroom on the binding seven_day window"],
+          },
+          { accountId: "work", eligible: false, reasons: ["Quota is unknown"] },
+        ],
+      })),
+    };
+    const { content, scope } = mountAccounts(client);
+    await vi.waitFor(() => expect(visibleText(rowOf(content, "home"))).toContain("Recommended"));
+    expect(visibleText(rowOf(content, "home"))).toContain("80%");
+    // Unknown headroom is explained, never turned into a number.
+    expect(visibleText(rowOf(content, "work"))).toContain("Not picked automatically");
+    expect(visibleText(rowOf(content, "work"))).not.toContain("0%");
+
+    const group = autoGroup(content);
+    expect(group.hidden).toBe(false);
+    expect(visibleText(group)).toContain("Switch automatically");
+    const toggle = descendants(group).find(
+      (element) => element.getAttribute("role") === "switch",
+    ) as (FakeElement & { checked?: boolean }) | undefined;
+    if (!toggle) throw new Error("Missing Auto switch");
+    expect(toggle.checked).toBe(false);
+    toggle.checked = true;
+    toggle.dispatch("change");
+    await vi.waitFor(() =>
+      expect(client.updateCodexAccountAuto).toHaveBeenCalledExactlyOnceWith({ enabled: true }),
+    );
+    // Not confirmed yet: the control shows the Host's last answer.
+    expect(toggle.checked).toBe(false);
+    updated.resolve(managed("work", 2, { auto: { enabled: true, strategy: "best" } }));
+    await vi.waitFor(() => expect(toggle.checked).toBe(true));
+
+    const strategy = descendants(group).find(({ tagName }) => tagName === "select");
+    if (!strategy) throw new Error("Missing strategy control");
+    client.updateCodexAccountAuto.mockResolvedValueOnce(
+      managed("work", 3, { auto: { enabled: true, strategy: "waste-first" } }),
+    );
+    strategy.value = "waste-first";
+    strategy.dispatch("change");
+    await vi.waitFor(() =>
+      expect(client.updateCodexAccountAuto).toHaveBeenLastCalledWith({ strategy: "waste-first" }),
+    );
+    await vi.waitFor(() => expect(visibleText(group)).toContain("expire at the next reset"));
+    scope.dispose();
+  });
+});
+
 describe("Renderer Updates page", () => {
   it.each([
     [updateStatus("prepared"), "正在准备更新..."],

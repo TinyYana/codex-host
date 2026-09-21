@@ -2,6 +2,8 @@ import type { AccountCreditsSnapshot } from "@codexhost/shared-contracts";
 
 import type { RendererSettingsLocale } from "./settings/localization.js";
 
+import { renderRendererCodexAccountSection } from "./renderer-codex-account-section.js";
+import type { RendererCodexAccountSwitchView } from "./renderer-codex-account-switch.js";
 import {
   applyRendererPopoverChrome,
   createRendererUsageRing,
@@ -20,6 +22,10 @@ export interface RendererCreditsControl {
   trigger: HTMLButtonElement;
   popover: HTMLDivElement;
   anchor: HTMLElement | null;
+  /** Called each time the popover goes from closed to open. */
+  onOpen: (() => void) | null;
+  /** The Switch & Retry offer this control already opened itself for. */
+  announcedOfferKey: string | null;
   dispose(): void;
   place(anchor: HTMLElement | null): boolean;
 }
@@ -279,14 +285,28 @@ function renderCreditsTile(
 
 function renderDetails(
   popover: HTMLDivElement,
-  credits: AccountCreditsSnapshot,
+  credits: AccountCreditsSnapshot | null,
   locale: RendererSettingsLocale,
+  accountSwitch: RendererCodexAccountSwitchView | null,
 ): void {
   const messages = rendererCreditsMessages(locale);
-  const glowColor = toneColor(rendererCreditsTone(credits.usedPercent));
-  popover.style.backgroundImage = `radial-gradient(160px 100px at 18% -10%, color-mix(in srgb, ${glowColor} 20%, transparent), transparent 70%)`;
   popover.setAttribute("aria-label", messages.details);
   popover.replaceChildren();
+  if (credits) renderCreditsDetails(popover, credits, locale, messages);
+  else popover.style.backgroundImage = "none";
+  if (accountSwitch) {
+    popover.append(renderRendererCodexAccountSection(document, accountSwitch, credits !== null));
+  }
+}
+
+function renderCreditsDetails(
+  popover: HTMLDivElement,
+  credits: AccountCreditsSnapshot,
+  locale: RendererSettingsLocale,
+  messages: RendererCreditsMessages,
+): void {
+  const glowColor = toneColor(rendererCreditsTone(credits.usedPercent));
+  popover.style.backgroundImage = `radial-gradient(160px 100px at 18% -10%, color-mix(in srgb, ${glowColor} 20%, transparent), transparent 70%)`;
   popover.append(renderCreditsHeader(credits, locale, messages));
   const tiles = (credits.productUsage ?? []).map((product) =>
     renderCreditsTile(
@@ -329,16 +349,22 @@ function closePopover(control: Pick<RendererCreditsControl, "trigger" | "popover
   control.trigger.setAttribute("aria-expanded", "false");
 }
 
-function openPopover(control: Pick<RendererCreditsControl, "trigger" | "popover">): void {
+function openPopover(
+  control: Pick<RendererCreditsControl, "trigger" | "popover" | "onOpen">,
+): void {
+  const wasOpen = control.trigger.getAttribute("aria-expanded") === "true";
   positionPopover(control);
   control.popover.hidden = false;
   if (typeof control.popover.showPopover === "function" && !popoverIsOpen(control.popover)) {
     control.popover.showPopover();
   }
   control.trigger.setAttribute("aria-expanded", "true");
+  if (!wasOpen) control.onOpen?.();
 }
 
-function togglePopover(control: Pick<RendererCreditsControl, "trigger" | "popover">): void {
+function togglePopover(
+  control: Pick<RendererCreditsControl, "trigger" | "popover" | "onOpen">,
+): void {
   if (control.trigger.getAttribute("aria-expanded") === "true") closePopover(control);
   else openPopover(control);
 }
@@ -414,6 +440,8 @@ export function mountRendererCreditsControl(composerId: string): RendererCredits
     trigger,
     popover,
     anchor: null,
+    onOpen: null,
+    announcedOfferKey: null,
     dispose() {
       closePopover(control);
       if (closeTimer !== null) window.clearTimeout(closeTimer);
@@ -455,7 +483,14 @@ export function mountRendererCreditsControl(composerId: string): RendererCredits
     cancelClose();
     closeTimer = window.setTimeout(() => {
       closeTimer = null;
-      if (!trigger.matches(":hover") && !popover.matches(":hover")) closePopover(control);
+      // The popover can hold Account actions: keep it open while it is hovered or focused.
+      if (
+        !trigger.matches(":hover") &&
+        !popover.matches(":hover") &&
+        !popover.contains(document.activeElement)
+      ) {
+        closePopover(control);
+      }
     }, 140);
   };
 
@@ -472,6 +507,7 @@ export function mountRendererCreditsControl(composerId: string): RendererCredits
   trigger.addEventListener("blur", scheduleClose);
   popover.addEventListener("pointerenter", cancelClose);
   popover.addEventListener("pointerleave", scheduleClose);
+  popover.addEventListener("focusout", scheduleClose);
   popover.addEventListener("toggle", () => {
     trigger.setAttribute("aria-expanded", String(popoverIsOpen(popover)));
   });
@@ -484,34 +520,53 @@ export function renderRendererCreditsControl(
   control: RendererCreditsControl,
   accountCredits: AccountCreditsSnapshot | null,
   locale: RendererSettingsLocale = "en",
+  /** Codex Account identity and switching; null everywhere else and on read-only Hosts. */
+  accountSwitch: RendererCodexAccountSwitchView | null = null,
 ): boolean {
-  if (accountCredits === null) {
+  if (accountCredits === null && accountSwitch === null) {
     control.root.style.display = "none";
+    control.announcedOfferKey = null;
     closePopover(control);
     return false;
   }
-  const remaining = remainingPercent(accountCredits.usedPercent);
-  const percent = formatRendererCreditsPercent(remaining);
-  const periodLabel = accountCredits.label
-    ? productLabel(accountCredits.label, locale)
-    : creditsPeriodLabel(accountCredits.periodType, locale);
-  const title = `${periodLabel} ${percent}`;
-  const tone = rendererCreditsTone(accountCredits.usedPercent);
   const ringSlot = control.trigger.querySelector<HTMLElement>("[data-codexhost-credits-ring]");
   const label = control.trigger.querySelector<HTMLElement>("[data-codexhost-credits-label]");
-  if (ringSlot) {
-    ringSlot.replaceChildren(
-      createRendererUsageRing(remaining, {
-        size: 14,
-        strokeWidth: 2.4,
-        color: toneColor(tone),
-      }),
+  let title: string;
+  if (accountCredits) {
+    const remaining = remainingPercent(accountCredits.usedPercent);
+    const percent = formatRendererCreditsPercent(remaining);
+    const periodLabel = accountCredits.label
+      ? productLabel(accountCredits.label, locale)
+      : creditsPeriodLabel(accountCredits.periodType, locale);
+    title = `${periodLabel} ${percent}`;
+    const tone = rendererCreditsTone(accountCredits.usedPercent);
+    ringSlot?.replaceChildren(
+      createRendererUsageRing(remaining, { size: 14, strokeWidth: 2.4, color: toneColor(tone) }),
     );
+    if (label) label.textContent = percent;
+  } else {
+    // Unknown quota stays unknown: the Account entry remains reachable without a made-up value.
+    title = accountSwitch?.title ?? "";
+    ringSlot?.replaceChildren();
+    if (label) label.textContent = "—";
   }
-  if (label) label.textContent = percent;
+  const offer = accountSwitch?.offer ?? null;
+  if (offer?.pillLabel) {
+    if (label) label.textContent = offer.pillLabel;
+    title = `${offer.message} ${title}`.trim();
+  }
+  if (accountSwitch?.current) title = `${title} · ${accountSwitch.current.name}`;
   control.root.style.display = "inline-flex";
   control.trigger.setAttribute("aria-label", title);
   control.trigger.title = title;
-  renderDetails(control.popover, accountCredits, locale);
+  control.onOpen = accountSwitch ? () => accountSwitch.opened() : null;
+  renderDetails(control.popover, accountCredits, locale, accountSwitch);
+  // A quota-wall offer opens the popover once; after that it is the user's to reopen.
+  if (offer?.tone === "warning" && offer.key !== control.announcedOfferKey) {
+    control.announcedOfferKey = offer.key;
+    openPopover(control);
+  } else if (!offer) {
+    control.announcedOfferKey = null;
+  }
   return true;
 }

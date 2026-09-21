@@ -46,6 +46,11 @@ function prependEditor(editor: HTMLElement, prefix: string): boolean {
   return prependTextarea(editor, prefix) || prependContentEditable(editor, prefix);
 }
 
+/** Inserts text at the start of a Composer editor through its own input path; never submits. */
+export function prependRendererComposerText(editor: HTMLElement, text: string): boolean {
+  return prependEditor(editor, text);
+}
+
 // Clicking compact always uses the native default; typed instructions remain supported.
 export function rendererHarnessCommandExecutesDirectly(command: HarnessCommandDescriptor): boolean {
   return command.invocation === "/compact" || command.argumentMode === "none";
