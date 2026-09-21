@@ -1,16 +1,37 @@
 import { z } from "zod";
 import {
   codexAccountPlanTypeSchema,
+  type AccountCreditsSnapshot,
   type CodexAccountListResult,
   type CodexAccountSummary,
+  type CodexAccountUsageResult,
 } from "@codexhost/shared-contracts";
 
-/** Current-only Codex identity. Credentials never cross this boundary. */
+/**
+ * Codex identity control plane. Credentials never cross this boundary.
+ * Management methods are absent on read-only deployments (remote/SSH, unsupported storage).
+ */
 export interface CodexAccountControl {
   snapshot(): CodexAccountListResult;
   /** Re-read the official current identity without changing native auth. */
   refresh?(): Promise<CodexAccountListResult>;
   currentAccountId(): string | null;
+  /** Save the current native login as a managed Account; returns its accountId. */
+  saveCurrent?(): Promise<string>;
+  switch?(accountId: string): Promise<void>;
+  remove?(accountId: string): Promise<void>;
+  recover?(): Promise<void>;
+  inspectInactiveUsage?(
+    accountId: string,
+    forceRefresh?: boolean,
+  ): Promise<CodexAccountUsageResult>;
+  recordUsage?(
+    accountId: string,
+    accountCredits: AccountCreditsSnapshot,
+  ): Promise<CodexAccountUsageResult>;
+  cachedUsage?(accountId: string): CodexAccountUsageResult | null;
+  /** False when the saved credential could not be refreshed and needs a native re-login. */
+  credentialUsable?(accountId: string): boolean;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

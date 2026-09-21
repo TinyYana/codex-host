@@ -4,9 +4,12 @@ import path from "node:path";
 import type { Writable } from "node:stream";
 import {
   currentCodexAccountFromOfficialRead,
-  SingleNativeCodexAccount,
   type CodexAccountControl,
 } from "./account/codex-account-control.js";
+import { findExternalCodexProcesses } from "./account/external-codex-processes.js";
+import { NativeAccountStore } from "./account/native-account-store.js";
+import { NativeCodexAccounts } from "./account/native-codex-accounts.js";
+import { OfficialAccountRuntime } from "./account/official-account-runtime.js";
 import { officialEnvironment } from "./app-server-host.js";
 import { OfficialRuntimeScope } from "./codex-runtime/official-runtime-scope.js";
 import { createOwnedLoopbackBackend } from "./codex-runtime/owned-official-backends.js";
@@ -64,29 +67,44 @@ export async function prepareLocalCodex(input: {
     identityReader.close();
     throw error;
   }
-  let current: ReturnType<typeof currentCodexAccountFromOfficialRead> = null;
-  const snapshot = () => ({
-    version: 2 as const,
-    currentAccountId: current?.accountId ?? null,
-    phase: scope.gate.phase,
-    revision: scope.gate.revision,
-    accounts: current ? [current] : [],
+  const store = new NativeAccountStore({ home });
+  const runtime = new OfficialAccountRuntime({
+    owner: scope.owner,
+    control: identityReader,
+    environment: input.environment,
+    readCredentials: () => store.readCredentials(),
+    findExternalProcesses: async () =>
+      findExternalCodexProcesses({
+        home,
+        defaultHome: await canonicalCodexHome(path.join(homedir(), ".codex")),
+        executableNames: [path.basename(input.stockCodexPath), "codex"],
+      }),
   });
-  const accounts = new SingleNativeCodexAccount(snapshot, async () => {
-    const response = await scope.owner.controlRequest("account/read", { refreshToken: false });
-    if (response.error) throw new Error("Official Account read failed");
-    current = currentCodexAccountFromOfficialRead(response.result);
-    return snapshot();
+  // Management stays dormant until a vault exists or the user saves an Account; until then this
+  // only projects the official identity, exactly like a read-only deployment.
+  const accounts = new NativeCodexAccounts({
+    store,
+    runtime,
+    diagnosticOutput: input.diagnosticOutput,
+    readOfficialIdentity: async () => {
+      const response = await scope.owner.controlRequest("account/read", { refreshToken: false });
+      if (response.error) throw new Error("Official Account read failed");
+      return currentCodexAccountFromOfficialRead(response.result);
+    },
   });
-  void accounts.refresh?.()?.catch(() => {
+  void accounts.refresh().catch(() => {
     input.diagnosticOutput.write("codexhost: Codex Account identity could not be read\n");
   });
   return {
     officialRuntimeScope: scope,
     accountControl: accounts,
     close: async () => {
-      await scope.close();
-      identityReader.close();
+      try {
+        await accounts.close();
+      } finally {
+        await scope.close();
+        identityReader.close();
+      }
     },
   };
 }

@@ -9,6 +9,7 @@ import type {
 } from "../official-app-server-connection.js";
 import { CodexRuntime, type CodexRuntimeOutput } from "./codex-runtime.js";
 import { OfficialAdmissionError, type OfficialWorkGate } from "./official-work-gate.js";
+import { OfficialNativeAuthActivity } from "./official-native-auth-activity.js";
 
 /** Created synchronously so a failed start never hides an owned, possibly live process. */
 export interface OwnedOfficialBackend {
@@ -29,7 +30,7 @@ interface Pending {
   id: string | number;
   method: string;
   params: JsonObject;
-  finish(): void;
+  finish(response?: JsonObject): void;
 }
 interface Client {
   id: string;
@@ -73,6 +74,7 @@ const RESUME_FIELDS = new Set([
 export class OfficialRuntimeOwner {
   readonly gate: OfficialWorkGate;
   readonly #factory: () => OwnedOfficialBackend;
+  readonly #nativeAuth: OfficialNativeAuthActivity;
   readonly #diagnosticOutput: Writable;
   readonly #clients = new Set<Client>();
   #backend: OwnedOfficialBackend | undefined;
@@ -83,6 +85,7 @@ export class OfficialRuntimeOwner {
 
   constructor(input: OfficialRuntimeOwnerOptions) {
     this.#factory = input.createBackend;
+    this.#nativeAuth = new OfficialNativeAuthActivity(input.gate);
     this.#diagnosticOutput = input.diagnosticOutput;
     this.gate = input.gate;
   }
@@ -168,6 +171,7 @@ export class OfficialRuntimeOwner {
         await backend.stop();
         // stop() must itself reject unconfirmed exit; this wait is an additional proof.
         await backend.closed;
+        this.#nativeAuth.backendStopped();
         for (const client of this.#clients) {
           client.runtime?.close();
           delete client.runtime;
@@ -338,7 +342,7 @@ export class OfficialRuntimeOwner {
 
   async #request(client: Client, method: string, params: JsonObject): Promise<JsonObject> {
     this.#checkMethod(method);
-    const finish = this.gate.admit();
+    const finish = this.#nativeAuth.admit(method, params);
     let response: JsonObject | undefined;
     try {
       const runtime = await this.#connection(client);
@@ -353,7 +357,7 @@ export class OfficialRuntimeOwner {
       this.#remember(client, method, params, response);
       return response;
     } finally {
-      finish();
+      finish(response);
     }
   }
 
@@ -376,7 +380,7 @@ export class OfficialRuntimeOwner {
       throw new Error("Official methods require a request ID");
     const params = object(value.params) ? value.params : {};
     this.#checkMethod(value.method);
-    const finish = this.gate.admit();
+    const finish = this.#nativeAuth.admit(value.method, params);
     let pendingKey: string | undefined;
     try {
       const runtime = await this.#connection(client);
@@ -416,6 +420,7 @@ export class OfficialRuntimeOwner {
       return;
     const value = event.value;
     if (!object(value)) return client.output(event);
+    this.#nativeAuth.observe(value);
     if (typeof value.id === "string" || typeof value.id === "number") {
       if (typeof value.method === "string") {
         const id = `codexhost:server:${client.id}:${event.generation}:${randomUUID()}`;
@@ -431,7 +436,7 @@ export class OfficialRuntimeOwner {
       if (pending) {
         this.#remember(client, pending.method, pending.params, value);
         client.pending.delete(requestKey(value.id));
-        pending.finish();
+        pending.finish(value);
       }
     }
     await client.output(event);

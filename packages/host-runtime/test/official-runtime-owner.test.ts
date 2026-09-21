@@ -210,7 +210,7 @@ describe("single official runtime owner", () => {
     { via: "send", method: "account/rateLimits/read" },
     { via: "send", method: "account/read" },
   ])(
-    "ends pending $via $method on intentional stop and admits work after restart",
+    "ends pending $via $method on intentional stop without poisoning switch admission",
     async ({ via, method }) => {
       const f = fixture();
       const { client, output } = f.attach();
@@ -228,8 +228,8 @@ describe("single official runtime owner", () => {
         await vi.waitFor(() =>
           expect(connection.requests.some((r) => r.method === method)).toBe(true),
         );
-        f.gate.unavailable();
-        await expect(client.request(method, {})).rejects.toMatchObject({ code: "unavailable" });
+        const lease = f.gate.beginStoppingChange();
+        await expect(client.request(method, {})).rejects.toMatchObject({ code: "changing" });
         await f.owner.stop();
         if (via === "request") expect(await pending).toBeInstanceOf(Error);
         else {
@@ -238,13 +238,13 @@ describe("single official runtime owner", () => {
             expect.objectContaining({ id: "desktop-request", error: expect.any(Object) }),
           );
         }
-        expect(f.gate.phase).toBe("unavailable");
-        expect(f.gate.busy).toBe(false);
+        expect(f.gate.phase).toBe("changing");
+        lease.assertIdle();
         expect(f.create).toHaveBeenCalledOnce();
-        await expect(client.request(method, {})).rejects.toMatchObject({ code: "unavailable" });
+        await expect(client.request(method, {})).rejects.toMatchObject({ code: "changing" });
         expect(f.create).toHaveBeenCalledOnce();
         await f.owner.start();
-        f.gate.initialized();
+        lease.finish("ready");
         await client.request("account/rateLimits/read", {});
         expect(f.connection(1).requests.filter((r) => r.method === method)).toHaveLength(
           method === "account/rateLimits/read" ? 1 : 0,
@@ -343,11 +343,12 @@ describe("single official runtime owner", () => {
         "thread/goal/set",
         "process/spawn",
       ]);
-      expect(f.gate.busy).toBe(false);
+      f.gate.beginChange().finish("ready");
       expect(f.owner.running).toBe(true);
+      const recovery = f.gate.beginChange(true);
       await f.owner.stop();
       await f.owner.start();
-      f.gate.initialized();
+      recovery.finish("ready");
       expect(f.peak()).toBe(1);
     } finally {
       await f.owner.stop();
@@ -378,7 +379,7 @@ describe("single official runtime owner", () => {
     }
   });
 
-  it("releases admission when a native RPC completes", async () => {
+  it("settles existing native RPCs normally during a saved-Account collection change", async () => {
     const f = fixture();
     const { client } = f.attach();
     try {
@@ -394,10 +395,11 @@ describe("single official runtime owner", () => {
       );
       const request = f.connection().requests.find((request) => request.method === "model/list");
       if (!request) throw new Error("Missing synthetic native request");
-      expect(f.gate.busy).toBe(true);
+      const change = f.gate.beginCollectionChange();
       f.connection().stdout.write(`${JSON.stringify({ id: request.id, result: { data: [] } })}\n`);
       await expect(result).resolves.toMatchObject({ result: { data: [] } });
       expect(f.gate.busy).toBe(false);
+      change.finish("ready");
       expect(f.gate.phase).toBe("ready");
     } finally {
       await f.owner.stop();
@@ -405,7 +407,7 @@ describe("single official runtime owner", () => {
     }
   });
 
-  it("tracks pending official credential reads as ordinary requests", async () => {
+  it("keeps credential replacement and recovery blocked by pending credential reads", async () => {
     const f = fixture();
     const { client } = f.attach();
     try {
@@ -414,7 +416,7 @@ describe("single official runtime owner", () => {
       f.gate.initialized();
       f.connection().setResponse(() => null);
       await client.send({ id: "auth", method: "account/read", params: { refreshToken: true } });
-      expect(f.gate.busy).toBe(true);
+      expect(() => f.gate.beginChange()).toThrow("busy");
       expect(f.gate.phase).toBe("ready");
     } finally {
       await f.owner.stop();
@@ -491,7 +493,7 @@ describe("single official runtime owner", () => {
   });
 
   it.each(["request", "send"] as const)(
-    "forwards native auth through %s without retaining a login lease",
+    "preserves native auth through %s while protecting explicit switches",
     async (transport) => {
       const f = fixture();
       const { client, output } = f.attach();
@@ -517,7 +519,7 @@ describe("single official runtime owner", () => {
           );
         }
         expect(f.connection().requests[0]?.params).toEqual(params);
-        expect(f.gate.busy).toBe(false);
+        expect(() => f.gate.beginStoppingChange()).toThrow("busy");
         expect(f.gate.phase).toBe("ready");
         const completed = {
           method: "account/login/completed",
@@ -526,13 +528,14 @@ describe("single official runtime owner", () => {
         f.connection().emit(completed);
         await vi.waitFor(() => expect(output).toContainEqual(completed));
         expect(f.gate.busy).toBe(false);
+        f.gate.beginStoppingChange().finish("ready");
       } finally {
         await f.owner.stop();
       }
     },
   );
 
-  it("does not retain native login activity after its response or client detach", async () => {
+  it("retains native login activity after client detach until backend exit", async () => {
     const f = fixture();
     const { client } = f.attach();
     await f.owner.start();
@@ -543,7 +546,7 @@ describe("single official runtime owner", () => {
     }));
     await client.request("account/login/start", {});
     client.close();
-    expect(f.gate.busy).toBe(false);
+    expect(() => f.gate.beginStoppingChange()).toThrow("busy");
     await f.owner.stop();
     expect(f.gate.busy).toBe(false);
   });
@@ -558,9 +561,10 @@ describe("single official runtime owner", () => {
       f.gate.initialized();
       expect(f.create).toHaveBeenCalledTimes(1);
       expect(f.native().connections).toHaveLength(2);
+      const change = f.gate.beginChange();
       await f.owner.stop();
       await f.owner.start();
-      f.gate.initialized();
+      change.finish("ready");
       expect(f.peak()).toBe(1);
       expect(f.events).toEqual(["start", "exit", "start"]);
       expect(f.native(1).connections).toHaveLength(2);
@@ -587,9 +591,10 @@ describe("single official runtime owner", () => {
         model: "original-model",
         cwd: "synthetic-cwd",
       });
+      const change = f.gate.beginChange();
       await f.owner.stop();
       await f.owner.start();
-      f.gate.initialized();
+      change.finish("ready");
       expect(f.connection(1).requests.map((r) => r.method)).toEqual(["initialize", "initialized"]);
       await a.client.request("turn/start", { threadId: "original", input: [] });
       expect(f.connection(1).requests.map((r) => r.method)).toEqual([
@@ -641,15 +646,17 @@ describe("single official runtime owner", () => {
           sandbox: "danger-full-access",
         });
 
+        const change = f.gate.beginChange();
         await f.owner.stop();
         await f.owner.start();
-        f.gate.initialized();
+        change.finish("ready");
         let generation = 1;
         if (dormant) {
-          // A generation with no user requests must still preserve subscription parameters.
+          // B had no user requests, so its loaded list is empty before switching back to A.
+          const back = f.gate.beginChange();
           await f.owner.stop();
           await f.owner.start();
-          f.gate.initialized();
+          back.finish("ready");
           generation++;
         }
         f.connection(generation).setResponse((request) => {
@@ -691,9 +698,10 @@ describe("single official runtime owner", () => {
           },
         ]);
 
+        const secondChange = f.gate.beginChange();
         await f.owner.stop();
         await f.owner.start();
-        f.gate.initialized();
+        secondChange.finish("ready");
         f.connection(generation + 1).setResponse((request) => {
           if (!request.method) return null;
           if (request.method === "thread/resume")
@@ -729,9 +737,10 @@ describe("single official runtime owner", () => {
       f.gate.initialized();
       await a.client.request("thread/resume", { threadId: "shared" });
       await b.client.request("thread/resume", { threadId: "shared" });
+      const change = f.gate.beginChange();
       await f.owner.stop();
       await f.owner.start();
-      f.gate.initialized();
+      change.finish("ready");
       await a.client.request("turn/interrupt", { threadId: "shared", turnId: "old" });
       await b.client.request("turn/interrupt", { threadId: "shared", turnId: "old" });
       for (const connection of f.native(1).connections) {
@@ -756,9 +765,10 @@ describe("single official runtime owner", () => {
       await b.client.initialize(initialization);
       f.gate.initialized();
       await a.client.request("thread/resume", { threadId: "unavailable-thread" });
+      const change = f.gate.beginChange();
       await f.owner.stop();
       await f.owner.start();
-      f.gate.initialized();
+      change.finish("ready");
       f.connection(1).setResponse((request) => ({
         id: request.id ?? null,
         ...(request.method === "thread/resume"
@@ -821,7 +831,7 @@ describe("single official runtime owner", () => {
     expect(f.gate.busy).toBe(false);
   });
 
-  it("requires initialization after restarting an unexpectedly exited backend", async () => {
+  it("requires explicit recovery after an unexpected backend exit", async () => {
     const f = fixture();
     const client = f.attach();
     await f.owner.start();
@@ -863,6 +873,8 @@ describe("single official runtime owner", () => {
         "synthetic reply send failure",
       );
       expect(f.gate.busy).toBe(false);
+      const change = f.gate.beginChange();
+      change.finish("ready");
     } finally {
       await f.owner.stop().catch(() => undefined);
     }
