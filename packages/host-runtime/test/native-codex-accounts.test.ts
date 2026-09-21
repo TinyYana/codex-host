@@ -3,7 +3,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { AccountReadFailure } from "../src/account/native-account-diagnostics.js";
 import path from "node:path";
 import { NativeCodexAccounts } from "../src/account/native-codex-accounts.js";
-import { NativeAccountError } from "../src/account/native-account-store.js";
+import { NativeAccountError, NativeAccountStore } from "../src/account/native-account-store.js";
 import { credential, createAccountState } from "./fixtures/codex-account-fixtures.js";
 const states: Awaited<ReturnType<typeof createAccountState>>[] = [];
 afterEach(async () => {
@@ -250,6 +250,31 @@ describe("credential replacement", () => {
     runtime.gate.unavailable();
     await accounts.recover();
     expect(accounts.snapshot()).toMatchObject({ phase: "ready", capabilities: { manage: true } });
+  });
+});
+describe("restart and auth drift", () => {
+  it("derives current from native credentials after a restart, never from a stored selector", async () => {
+    const { accounts, store, runtime, b } = await setup();
+    await accounts.switch(b);
+    await accounts.close();
+    // A new Host process over the same home: nothing but auth.json says who is current.
+    const restartedStore = new NativeAccountStore({ home: store.home });
+    const restarted = new NativeCodexAccounts({ store: restartedStore, runtime });
+    try {
+      expect((await restarted.refresh()).currentAccountId).toBe(b);
+    } finally {
+      await restarted.close();
+    }
+  });
+  it("follows an external re-login instead of showing the last switched Account", async () => {
+    const { accounts, store, a, b } = await setup();
+    await accounts.switch(b);
+    // The official Desktop (or CLI) signs back into A behind the Host's back.
+    await writeFile(
+      path.join(store.home, "auth.json"),
+      credential("a", 3).serializeForNativeStore(),
+    );
+    expect((await accounts.refresh()).currentAccountId).toBe(a);
   });
 });
 describe("explicit save", () => {

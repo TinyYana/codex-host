@@ -90,7 +90,8 @@
 | 文档 | 内容与阅读时机 |
 | --- | --- |
 | [`product/codex-accounts.md`](product/codex-accounts.md) | 设置页中的原生账号与额度、手动导入 Pi 及导入记录管理；修改账号 UI、查询或凭证导入链路时阅读。 |
-| [`product/codex-native-account-switching-design.md`](product/codex-native-account-switching-design.md) | 移除 Codex 多账号切换后的只读边界；修改 Codex 认证或账号路由时阅读。 |
+| [`product/codex-managed-accounts.md`](product/codex-managed-accounts.md) | Codex 多帳號保存、受控切換交易、統一額度、Quota Ranker、Auto 與 Switch & Retry、migration；修改帳號管理、切換或額度 Ranking 時閱讀。 |
+| [`product/codex-native-account-switching-design.md`](product/codex-native-account-switching-design.md) | Codex 帳號切換的設計邊界與歷史脈絡；修改 Codex 認證或帳號路由時閱讀。 |
 | [`architecture/renderer-settings-styling.md`](architecture/renderer-settings-styling.md) | 设置页 Tailwind CSS 使用边界、构建方式与编写规则；新增或改版设置页界面时阅读。 |
 | [`operations/codex-desktop-upgrade-diagnosis-playbook.md`](operations/codex-desktop-upgrade-diagnosis-playbook.md) | Desktop 更新后 Renderer、Bridge、Agent 和 Model 异常的诊断流程；升级兼容性回归时阅读。 |
 
