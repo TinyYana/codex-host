@@ -14,7 +14,8 @@ export function parseProcessRows(stdout: string): ProcessRow[] {
   const rows: ProcessRow[] = [];
   for (const line of stdout.split("\n")) {
     const match = /^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/u.exec(line);
-    if (match) rows.push({ pid: Number(match[1]), ppid: Number(match[2]), command: match[3]! });
+    const command = match?.[3];
+    if (match && command) rows.push({ pid: Number(match[1]), ppid: Number(match[2]), command });
   }
   return rows;
 }

@@ -36,6 +36,7 @@ export class NativeCodexAccounts implements CodexAccountControl {
   readonly #instanceId = randomUUID();
   readonly #readOfficialIdentity: (() => Promise<CodexAccountSummary | null>) | undefined;
   /** Official `account/read` identity; displays a native login that is not saved. */
+  #isIdle: (() => boolean) | undefined;
   #official: CodexAccountSummary | null = null;
   #officialRevision = 0;
   #vault: NativeAccountVault = { version: 3, revision: 0, accounts: [] };
@@ -183,12 +184,20 @@ export class NativeCodexAccounts implements CodexAccountControl {
     }
     return this.#runtime.gate.phase === "ready";
   }
+  bindIdleProbe(isIdle: () => boolean): void {
+    this.#isIdle = isIdle;
+  }
   async switch(accountId: string): Promise<void> {
     const kind = "switch";
     const step = <T>(name: AccountDiagnosticStep, action: () => T | Promise<T>) =>
       this.#diagnostics.step(kind, name, action);
     await step("storage-check", () => this.#requireManagement());
     const change = await step("assert-idle", () => this.#begin(kind));
+    // New work is already refused; a Turn that is still running must never be stopped.
+    if (this.#isIdle && !this.#isIdle()) {
+      this.#finish(change, true);
+      throw new OfficialAdmissionError("busy");
+    }
     let source: NativeCodexCredentials | null = null,
       stopping = false,
       stopped = false,
@@ -312,7 +321,16 @@ export class NativeCodexAccounts implements CodexAccountControl {
     accountId: string,
     credits: AccountCreditsSnapshot,
   ): Promise<CodexAccountUsageResult> {
-    await this.#initializing;
+    await this.#initializing?.catch(() => undefined);
+    // The persisted quota cache is keyed by saved Accounts; an unsaved login has no entry.
+    if (!this.#store.ready || !this.#store.vault.accounts.some((a) => a.accountId === accountId))
+      return {
+        accountId,
+        usage: null,
+        accountCredits: credits,
+        freshness: "live",
+        observedAt: new Date().toISOString(),
+      };
     return this.#quotas.record(accountId, credits);
   }
   credentialUsable(accountId: string): boolean {

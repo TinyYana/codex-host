@@ -120,6 +120,18 @@ describe("credential replacement", () => {
       step: "verify-identity-mismatch",
     });
   });
+  it("refuses to switch while a Turn is active and leaves the backend running", async () => {
+    const { accounts, runtime, a, b } = await setup();
+    let idle = false;
+    accounts.bindIdleProbe(() => idle);
+    await expect(accounts.switch(b)).rejects.toMatchObject({ code: "busy" });
+    expect(runtime.events).not.toContain("stop");
+    expect(accounts.snapshot()).toMatchObject({ phase: "ready", currentAccountId: a });
+    expect(() => runtime.gate.admit()()).not.toThrow();
+    idle = true;
+    await accounts.switch(b);
+    expect(accounts.snapshot().currentAccountId).toBe(b);
+  });
   it("same identity does not stop", async () => {
     const { accounts, a, runtime } = await setup();
     await accounts.switch(a ?? "missing");
@@ -234,7 +246,7 @@ describe("credential replacement", () => {
     const { accounts, runtime } = await setup();
     vi.spyOn(runtime, "checkCredentialStorage").mockRejectedValueOnce(new Error("unsupported"));
     await expect(accounts.initialize()).rejects.toThrow("unsupported");
-    expect(accounts.snapshot().capabilities.manage).toBe(false);
+    expect(accounts.snapshot().capabilities?.manage).toBe(false);
     runtime.gate.unavailable();
     await accounts.recover();
     expect(accounts.snapshot()).toMatchObject({ phase: "ready", capabilities: { manage: true } });

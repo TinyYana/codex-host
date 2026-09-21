@@ -23,7 +23,7 @@ function fixture() {
     currentAccountId: null,
     phase: "ready",
     revision: 0,
-    capabilities: { manage: true, switch: true, login: true, delete: true },
+    capabilities: { manage: true, saveCurrent: true, switch: true, delete: true },
     accounts: [],
   };
   const refresh = vi.fn(async () => snapshot);

@@ -69,7 +69,9 @@ describe("rankAccountCandidates", () => {
         { product: "Spark", usagePercent: 100 },
       ],
     };
-    const { entries } = rankAccountCandidates([candidate("a", { credits: scoped })], { nowMs: NOW });
+    const { entries } = rankAccountCandidates([candidate("a", { credits: scoped })], {
+      nowMs: NOW,
+    });
     expect(entries[0]).toMatchObject({ eligible: true, headroomPercent: 90 });
   });
 

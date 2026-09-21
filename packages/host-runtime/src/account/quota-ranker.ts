@@ -27,7 +27,8 @@ export interface QuotaCandidate {
   observedAtMs: number | null;
 }
 
-export type QuarantineReason = "credential-unusable" | "quota-unknown" | "quota-stale" | "exhausted";
+export type QuarantineReason =
+  "credential-unusable" | "quota-unknown" | "quota-stale" | "exhausted";
 
 export interface RankedCandidate {
   id: string;
@@ -116,7 +117,10 @@ function headroom(window: QuotaWindow, nowMs: number): number {
   return Math.max(0, 100 - window.usedPercent);
 }
 
-function derive(candidate: QuotaCandidate, options: Required<Omit<QuotaRankOptions, "lastSwitchAtMs">>) {
+function derive(
+  candidate: QuotaCandidate,
+  options: Required<Omit<QuotaRankOptions, "lastSwitchAtMs">>,
+) {
   const entry: RankedCandidate = { id: candidate.id, eligible: false, score: -1, reasons: [] };
   const quarantine = (reason: QuarantineReason, text: string): RankedCandidate => {
     entry.quarantine = reason;
@@ -146,25 +150,26 @@ function derive(candidate: QuotaCandidate, options: Required<Omit<QuotaRankOptio
   }
   if (!candidate.credentialUsable)
     return quarantine("credential-unusable", "Credential needs a native re-login");
-  if (!entry.binding || candidate.observedAtMs === null)
+  const { binding, headroomPercent } = entry;
+  if (!binding || headroomPercent === undefined || candidate.observedAtMs === null)
     return quarantine("quota-unknown", "Quota is unknown; unknown is never treated as unused");
   if (options.nowMs - candidate.observedAtMs > options.maxAgeMs)
     return quarantine("quota-stale", "Quota observation is stale; refresh before auto-selecting");
-  if (entry.headroomPercent! <= options.wallHeadroomPercent)
+  if (headroomPercent <= options.wallHeadroomPercent)
     return quarantine(
       "exhausted",
-      `${entry.binding.period} window has ${entry.headroomPercent!.toFixed(0)}% headroom left`,
+      `${binding.period} window has ${headroomPercent.toFixed(0)}% headroom left`,
     );
   entry.eligible = true;
   const waste = entry.wasteRisk ?? 0;
   entry.score =
     options.strategy === "consume-first"
-      ? 100 - entry.headroomPercent!
+      ? 100 - headroomPercent
       : options.strategy === "waste-first"
         ? waste * 100
-        : entry.headroomPercent! + waste * 50;
+        : headroomPercent + waste * 50;
   entry.reasons.push(
-    `${entry.headroomPercent!.toFixed(0)}% headroom on the binding ${entry.binding.period} window`,
+    `${headroomPercent.toFixed(0)}% headroom on the binding ${binding.period} window`,
   );
   if (waste >= 0.2)
     entry.reasons.push(`${(waste * 100).toFixed(0)}% of the long window would expire unused`);
@@ -212,6 +217,8 @@ export function rankAccountCandidates(
   return {
     strategy: options.strategy,
     recommendedId,
-    entries: entries.sort((left, right) => right.score - left.score || left.id.localeCompare(right.id)),
+    entries: entries.sort(
+      (left, right) => right.score - left.score || left.id.localeCompare(right.id),
+    ),
   };
 }

@@ -28,7 +28,7 @@ function setup(
     },
     environment: {},
     readCredentials: async () => current,
-    stopExternalProcesses: async () => {},
+    findExternalProcesses: async () => [],
   });
   return { runtime, controlRequest };
 }

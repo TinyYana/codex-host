@@ -28,7 +28,7 @@ it("writes only safe fields to both sinks, repairs permissions and retains 200 l
       ),
     );
     await diagnostics
-      .step("logout", "rollback-verify-read", () => {
+      .step("recover", "rollback-verify-read", () => {
         throw new AccountReadFailure(-42, "verify-account-null");
       })
       .catch(() => undefined);
@@ -40,7 +40,7 @@ it("writes only safe fields to both sinks, repairs permissions and retains 200 l
       expect(line).not.toMatch(/token|secret|email|account-id|private/);
     }
     expect(JSON.parse(lines.at(-1) ?? "null")).toMatchObject({
-      operation: "logout",
+      operation: "recover",
       step: "rollback-verify-account-null",
       code: -42,
     });

@@ -2,7 +2,7 @@
 
 ### Requirement: Host SHALL manage saved Codex accounts as opaque secrets
 
-CodexHost SHALL keep saved Codex accounts in a vault under `<CODEX_HOME>/.codexhost-native-accounts/` with directory mode 0700, file mode 0600, and atomic replace writes. Each saved credential SHALL be the verbatim native `auth.json` text with unknown fields preserved. Credential material SHALL NOT appear in Renderer-visible contracts, logs, diagnostics, or error text. The vault SHALL support at least two accounts and impose no fixed upper count. Existing v1–v3 vault files from removed releases SHALL be readable and upgraded to v3 on first write; until the user performs a manage action the file SHALL NOT be rewritten.
+CodexHost SHALL keep saved Codex accounts in a vault under `<CODEX_HOME>/.codexhost-native-accounts/` with directory mode 0700, file mode 0600, and atomic replace writes. Each saved credential SHALL be the verbatim native `auth.json` text with unknown fields preserved. Credential material SHALL NOT appear in Renderer-visible contracts, logs, diagnostics, or error text. The vault SHALL support at least two accounts and impose no fixed upper count. Existing v1–v3 vault files from removed releases SHALL be readable and upgraded to v3 when opened. While no vault exists Host SHALL NOT create one, check credential storage, or write anything until the user saves an Account.
 
 #### Scenario: Save current account
 
@@ -32,7 +32,7 @@ The current account SHALL be derived by matching the permanent `auth.json` ident
 
 ### Requirement: Account switch SHALL be a verified transaction
 
-Switching SHALL: assert idle (no active official or external work; new admissions fail fast as busy during the switch), capture the current credential, stop the owned backend awaiting exit proof, atomically install the target credential, start the backend, and verify identity via official `account/read` before updating current state or UI. In-flight official requests SHALL be drained for a bounded time before stopping; drain timeout SHALL abort the switch without stopping the backend. On start or verify failure, Host SHALL reinstall the captured credential and re-verify; if rollback fails the account phase SHALL become `unavailable` requiring recovery. Responses and notifications from a retired backend generation SHALL NOT update post-switch state or UI.
+Switching SHALL: assert idle (no active official or external work; new admissions fail fast as busy during the switch), capture the current credential, stop the owned backend awaiting exit proof, atomically install the target credential, start the backend, and verify identity via official `account/read` before updating current state or UI. In-flight official requests SHALL be returned to their original request client as an explicit retired failure rather than silently dropped. On start or verify failure, Host SHALL reinstall the captured credential and re-verify; if rollback fails the account phase SHALL become `unavailable` requiring recovery. Responses and notifications from a retired backend generation SHALL NOT update post-switch state or UI.
 
 #### Scenario: Successful switch
 

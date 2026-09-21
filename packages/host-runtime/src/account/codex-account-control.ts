@@ -16,6 +16,8 @@ export interface CodexAccountControl {
   /** Re-read the official current identity without changing native auth. */
   refresh?(): Promise<CodexAccountListResult>;
   currentAccountId(): string | null;
+  /** Lets the owner of Turn state veto a switch; without it only in-flight requests are known. */
+  bindIdleProbe?(isIdle: () => boolean): void;
   /** Save the current native login as a managed Account; returns its accountId. */
   saveCurrent?(): Promise<string>;
   switch?(accountId: string): Promise<void>;
