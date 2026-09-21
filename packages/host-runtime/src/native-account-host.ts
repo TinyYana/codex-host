@@ -56,10 +56,11 @@ export async function prepareLocalCodex(input: {
   // controlRequest requires an initialized client on this same owned backend.
   // This connection only reads native identity; it does not own authentication.
   const identityReader = scope.owner.attachManagement(async () => {});
-  identityReader.configure({
+  const identityReaderInitialization = {
     clientInfo: { name: "codexhost_identity_reader", version: "1" },
     capabilities: { experimentalApi: true },
-  });
+  };
+  identityReader.configure(identityReaderInitialization);
   try {
     await scope.start();
   } catch (error) {
@@ -70,7 +71,7 @@ export async function prepareLocalCodex(input: {
   const store = new NativeAccountStore({ home });
   const runtime = new OfficialAccountRuntime({
     owner: scope.owner,
-    control: identityReader,
+    control: { session: identityReader, initialization: identityReaderInitialization },
     environment: input.environment,
     readCredentials: () => store.readCredentials(),
     findExternalProcesses: async () =>

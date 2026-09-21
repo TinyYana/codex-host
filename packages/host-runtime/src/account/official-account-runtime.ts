@@ -29,13 +29,15 @@ type Owner = Pick<
 export class OfficialAccountRuntime implements NativeAccountRuntime {
   readonly #owner: Owner;
   readonly #control: OfficialClientSession;
+  #initialization: JsonObject = initialization;
   readonly #environment: NodeJS.ProcessEnv;
   readonly #readCredentials: () => Promise<NativeCodexCredentials | null>;
   readonly #findExternal: () => Promise<readonly number[]>;
   constructor(input: {
     owner: Owner;
-    /** Reuse an existing management connection instead of attaching another one. */
-    control?: OfficialClientSession;
+    /** Reuse an existing management connection (with its own initialization) instead of
+     * attaching another one. */
+    control?: { session: OfficialClientSession; initialization: JsonObject };
     environment: NodeJS.ProcessEnv;
     readCredentials(): Promise<NativeCodexCredentials | null>;
     /** PIDs of Codex processes CodexHost does not own that share this home. */
@@ -45,8 +47,10 @@ export class OfficialAccountRuntime implements NativeAccountRuntime {
     this.#environment = input.environment;
     this.#readCredentials = input.readCredentials;
     this.#findExternal = input.findExternalProcesses;
-    if (input.control) this.#control = input.control;
-    else {
+    if (input.control) {
+      this.#control = input.control.session;
+      this.#initialization = input.control.initialization;
+    } else {
       this.#control = input.owner.attachManagement(async () => {});
       this.#control.configure(initialization);
     }
@@ -140,7 +144,7 @@ export class OfficialAccountRuntime implements NativeAccountRuntime {
   async #read(method: string, params: JsonObject): Promise<JsonObject> {
     let response: JsonObject;
     try {
-      await this.#control.initialize(initialization);
+      await this.#control.initialize(this.#initialization);
       response = await this.#owner.controlRequest(method, params);
     } catch (error) {
       throw new AccountTransportFailure(rpcErrorCode(error));
