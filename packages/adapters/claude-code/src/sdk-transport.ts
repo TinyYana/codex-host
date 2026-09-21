@@ -19,7 +19,11 @@ import {
   readClaudeUserModelPicker,
   type ClaudeModelInspectionSnapshot,
 } from "./model-catalog.js";
-import { ClaudeNativeTurnAccumulator, parseClaudePlanLimitEvent } from "./native-message.js";
+import {
+  ClaudeNativeTurnAccumulator,
+  parseClaudeGoalSignal,
+  parseClaudePlanLimitEvent,
+} from "./native-message.js";
 import { isClaudePermissionMode, type ClaudePermissionMode } from "./permission-modes.js";
 import { closeClaudeProcessGroup } from "./process-fence.js";
 import { claudeThinkingConfiguration, parseClaudeThinkingOptionId } from "./thinking-options.js";
@@ -27,6 +31,7 @@ import type {
   ClaudeApprovalRequest,
   ClaudeApprovalSuggestionScope,
   ClaudeAutonomousTurn,
+  ClaudeGoalSignal,
   ClaudeIdleTurnHandler,
   ClaudeInteractionRequest,
   ClaudeInteractionResponse,
@@ -112,6 +117,7 @@ export interface ClaudeSdkTransportOptions {
   onPermissionModeChanged(permissionMode: ClaudePermissionMode): void;
   onFault(error: unknown): void;
   onPlanLimit(planLimit: ClaudePlanLimitEvent): void;
+  onGoalSignal?(signal: ClaudeGoalSignal): void;
   queryFactory?: typeof query;
 }
 
@@ -381,6 +387,7 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
   readonly #onFault: (error: unknown) => void;
   readonly #onPermissionModeChanged: (permissionMode: ClaudePermissionMode) => void;
   readonly #onPlanLimit: (planLimit: ClaudePlanLimitEvent) => void;
+  readonly #onGoalSignal: ((signal: ClaudeGoalSignal) => void) | undefined;
   readonly #openMode: "create" | "resume";
   #permissionMode: ClaudePermissionMode;
   readonly #queryFactory: typeof query;
@@ -416,6 +423,7 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
     this.#onFault = options.onFault;
     this.#onPermissionModeChanged = options.onPermissionModeChanged;
     this.#onPlanLimit = options.onPlanLimit;
+    this.#onGoalSignal = options.onGoalSignal;
     this.#openMode = options.openMode;
     this.#permissionMode = options.permissionMode;
     this.#queryFactory = options.queryFactory ?? query;
@@ -897,6 +905,14 @@ export class ClaudeSdkTransport implements ClaudeTurnTransport {
         }
         const planLimit = parseClaudePlanLimitEvent(message);
         if (planLimit) this.#onPlanLimit(planLimit);
+        // Goal evidence is Session-scoped: it must reach the Adapter whether or
+        // not a requested Turn, an idle continuation, or autonomous work owns
+        // the message.
+        const goalSignal = parseClaudeGoalSignal(message);
+        if (goalSignal) this.#onGoalSignal?.(goalSignal);
+        // `/goal` acknowledgements are control records, not Assistant output.
+        // Feeding them to a Turn accumulator would create a phantom message.
+        if (goalSignal?.type === "command") continue;
         const active = this.#active;
         if (active) {
           const interpreted = active.accumulator.consume(message);

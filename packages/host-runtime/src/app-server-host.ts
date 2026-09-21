@@ -19,12 +19,14 @@ import type { Readable, Writable } from "node:stream";
 
 import type {
   HarnessAdapter,
+  HarnessGoalCapability,
   HarnessOutput,
   HarnessSession,
   HostApprovalInteraction,
   HostSubagentState,
   HostApprovalResponse,
   HostQuestionInteraction,
+  SessionGoalChangedEvent,
 } from "@codexhost/harness-adapter";
 import { parseHostUsage, type HostUsage } from "@codexhost/harness-adapter";
 import type { HarnessPluginContext } from "@codexhost/harness-adapter/plugin";
@@ -37,7 +39,6 @@ import {
   harnessAccountListParamsSchema,
   harnessAccountListResultSchema,
   harnessAccountSourceListParamsSchema,
-  codexAccountUsageParamsSchema,
   codexAccountUsageResultSchema,
   harnessPluginListParamsSchema,
   harnessPluginListResultSchema,
@@ -104,6 +105,12 @@ import {
   type ExternalThreadLocation,
   type ExternalThreadResolution,
 } from "./external-thread-runtime.js";
+import {
+  externalThreadGoalFromHarness,
+  parseThreadGoalSetParams,
+  projectThreadGoal,
+  settledGoalStatus,
+} from "./external-thread-goal.js";
 import { ExternalSteerError, ExternalTurnSteering } from "./external-turn-steering.js";
 import {
   DELEGATION_CLI_PATH_ENV,
@@ -151,6 +158,12 @@ import {
   SingleNativeCodexAccount,
   type CodexAccountControl,
 } from "./account/codex-account-control.js";
+import { CodexAccountAutoSwitch } from "./account/account-auto-switch.js";
+import {
+  CODEX_ACCOUNT_METHODS,
+  CodexAccountRequests,
+  codexAccountRpcError,
+} from "./codex-account-requests.js";
 
 import {
   createOwnedConnectionBackend,
@@ -296,13 +309,6 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function codexAccountRpcError(error: unknown): { code: number; message: string } {
-  const message = error instanceof Error ? error.message : "";
-  return message === "Unknown Codex Account"
-    ? { code: -32086, message }
-    : { code: -32086, message: "Codex Account operation failed" };
-}
-
 export function officialEnvironment(source: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const allowed = new Set([
     DELEGATION_CLI_PATH_ENV,
@@ -382,6 +388,9 @@ const EXPLICIT_EXTERNAL_THREAD_METHODS = new Set([
   "thread/archive",
   "thread/delete",
   "thread/fork",
+  "thread/goal/clear",
+  "thread/goal/get",
+  "thread/goal/set",
   "thread/items/list",
   "thread/metadata/update",
   "thread/name/set",
@@ -516,6 +525,8 @@ export class AppServerHost {
   #sessionImportRequests: SessionImportRequests | undefined;
   #unregisterDelegationApi: (() => void) | undefined;
   #unsubscribeAccountState: (() => void) | undefined;
+  readonly #accountAutoSwitch: CodexAccountAutoSwitch | undefined;
+  readonly #codexAccountRequests: CodexAccountRequests;
   #activeOfficialTurns = new Map<string, string>();
   #pendingOfficialTurnStarts = new Map<unknown, string>();
   #activeWorkDrainWaiters = new Set<() => void>();
@@ -609,8 +620,28 @@ export class AppServerHost {
             this.#diagnose("Codex Account identity or notification could not be updated"),
         })
       : undefined;
+    this.#accountControl.bindIdleProbe?.(() => !this.#hasActiveWork());
+    // Auto exists only where the control plane can actually switch Accounts.
+    this.#accountAutoSwitch = this.#accountControl.switch
+      ? new CodexAccountAutoSwitch({
+          directory: path.join(
+            this.#officialRuntimeScope.permanentHome,
+            ".codexhost-native-accounts",
+          ),
+          control: this.#accountControl,
+          currentUsage: (accountId) => this.#currentCodexAccountUsage(accountId, false),
+          isIdle: () => !this.#closeRequested && !this.#hasActiveWork(),
+          diagnosticOutput: { write: (text: string) => (this.#diagnose(text.trim()), true) },
+        })
+      : undefined;
+    void this.#accountAutoSwitch?.load();
+    this.#codexAccountRequests = new CodexAccountRequests({
+      control: this.#accountControl,
+      auto: this.#accountAutoSwitch,
+      currentUsage: (accountId, refresh) => this.#currentCodexAccountUsage(accountId, refresh),
+    });
     this.#unsubscribeAccountState = this.#officialRuntimeScope.gate.subscribe(() => {
-      const snapshot = this.#accountControl.snapshot();
+      const snapshot = this.#codexAccountRequests.snapshot();
       void this.#writer
         .json({ method: "codexhost/account/changed", params: jsonValueSchema.parse(snapshot) })
         .catch(() => undefined);
@@ -861,6 +892,8 @@ export class AppServerHost {
 
   #signalActiveWorkChanged(): void {
     if (!this.#closeRequested && this.#hasActiveWork()) return;
+    // A drained Turn boundary is the only place Auto may change the Codex Account.
+    if (!this.#closeRequested) void this.#accountAutoSwitch?.evaluate();
     const waiters = [...this.#activeWorkDrainWaiters];
     this.#activeWorkDrainWaiters.clear();
     for (const resolve of waiters) resolve();
@@ -966,11 +999,7 @@ export class AppServerHost {
       this.#dispatchDesktopRequest(() => this.#handleUpdateRequest(request));
       return;
     }
-    if (
-      request.method === "codexhost/account/usage/inspect" ||
-      request.method === "codexhost/account/list" ||
-      request.method === "codexhost/account/refresh"
-    ) {
+    if (CODEX_ACCOUNT_METHODS.has(request.method)) {
       this.#dispatchDesktopRequest(() => this.#handleCodexAccountRequest(request));
       return;
     }
@@ -1337,6 +1366,24 @@ export class AppServerHost {
         return;
       }
     }
+    if (
+      request.method === "thread/goal/get" ||
+      request.method === "thread/goal/set" ||
+      request.method === "thread/goal/clear"
+    ) {
+      const params = requestObject(request);
+      const resolution =
+        typeof params.threadId === "string"
+          ? await this.#resolveExternalThread(params.threadId)
+          : ({ kind: "official" } as const);
+      if (await this.#writeResolutionError(request, resolution)) return;
+      if (resolution.kind === "external") {
+        this.#dispatchDesktopRequest(() =>
+          this.#handleExternalGoalRequest(request, resolution.thread),
+        );
+        return;
+      }
+    }
     if (request.method === "thread/turns/list" || request.method === "thread/items/list") {
       const params = requestObject(request);
       const resolution =
@@ -1613,37 +1660,24 @@ export class AppServerHost {
     return this.#accountControl.currentAccountId();
   }
 
-  async #codexAccountSnapshot() {
-    return this.#accountControl.refresh?.() ?? this.#accountControl.snapshot();
+  async #currentCodexAccountUsage(accountId: string, refresh: boolean) {
+    const observation = await this.#refreshOfficialRateLimits(accountId, refresh);
+    const accountCredits = this.#officialAccountCredits(accountId);
+    return codexAccountUsageResultSchema.parse({
+      accountId,
+      usage: this.#officialRateLimits.get(accountId),
+      ...(accountCredits ? { accountCredits } : {}),
+      freshness: observation.status === "live" ? ("live" as const) : ("cached" as const),
+      observedAt: observation.observedAt,
+    });
   }
 
   async #handleCodexAccountRequest(request: JsonRpcRequest): Promise<void> {
     try {
-      if (request.method === "codexhost/account/usage/inspect") {
-        const { accountId, refresh } = codexAccountUsageParamsSchema.parse(requestObject(request));
-        if (accountId !== (await this.#currentCodexAccountId()))
-          throw new Error("Unknown Codex Account");
-        const observation = await this.#refreshOfficialRateLimits(accountId, refresh === true);
-        const usage = this.#officialRateLimits.get(accountId);
-        const accountCredits = this.#officialAccountCredits(accountId);
-        const result = codexAccountUsageResultSchema.parse({
-          accountId,
-          usage,
-          ...(accountCredits ? { accountCredits } : {}),
-          freshness: observation.status === "live" ? ("live" as const) : ("cached" as const),
-          observedAt: observation.observedAt,
-        });
-        await this.#writer.json(rpcEnvelope(request, { result: jsonValueSchema.parse(result) }));
-        return;
-      }
-      await this.#writer.json(
-        rpcEnvelope(request, {
-          result: jsonValueSchema.parse(await this.#codexAccountSnapshot()),
-        }),
-      );
+      const result = await this.#codexAccountRequests.handle(request.method, request.params ?? {});
+      await this.#writer.json(rpcEnvelope(request, { result }));
     } catch (error) {
-      const failure = codexAccountRpcError(error);
-      await this.#writer.json(rpcError(request, failure.code, failure.message));
+      await this.#writer.json(rpcEnvelope(request, { error: codexAccountRpcError(error) }));
     }
   }
 
@@ -3261,6 +3295,320 @@ export class AppServerHost {
     });
   }
 
+  /**
+   * Codex Desktop's Goal surface, served from the Harness-owned Goal. Host
+   * never emulates a Goal: Harnesses without native Goal control get an
+   * explicit refusal, and Desktop-only statuses (`paused`) stay in Host.
+   */
+  async #handleExternalGoalRequest(request: JsonRpcRequest, thread: ExternalThread): Promise<void> {
+    const control = thread.session.goal;
+    if (!control) {
+      // Reading is harmless (Desktop hydrates after every resume); control is not.
+      await this.#writer.json(
+        request.method === "thread/goal/get"
+          ? rpcEnvelope(request, { result: { goal: null } })
+          : rpcError(request, -32078, "External Harness does not support Goals"),
+      );
+      return;
+    }
+    try {
+      await this.#loadExternalGoal(thread, control);
+      if (request.method === "thread/goal/get") {
+        await this.#writer.json(
+          rpcEnvelope(request, { result: { goal: this.#projectExternalGoal(thread) } }),
+        );
+        return;
+      }
+      if (request.method === "thread/goal/clear") {
+        await this.#clearExternalGoal(request, thread, control);
+        return;
+      }
+      await this.#setExternalGoal(request, thread, control);
+    } catch (error) {
+      await this.#writer.json(rpcError(request, -32073, errorMessage(error)));
+    } finally {
+      this.#signalActiveWorkChanged();
+    }
+  }
+
+  async #loadExternalGoal(thread: ExternalThread, control: HarnessGoalCapability): Promise<void> {
+    if (thread.goalLoaded) return;
+    const result = await control.read();
+    if (!result.ok) throw new Error(result.error.message);
+    // thread/goal/* requests dispatch concurrently and `session.goal.changed`
+    // can land during the read; never let stale evidence overwrite what a
+    // faster path already recorded.
+    if (thread.goalLoaded) return;
+    thread.goal = result.value
+      ? {
+          ...externalThreadGoalFromHarness(result.value, null, thread.latestUsage, Date.now()),
+          // Native evidence survives Host restarts, but no Turn is running yet.
+          status: "paused",
+        }
+      : null;
+    thread.goalLoaded = true;
+  }
+
+  #projectExternalGoal(thread: ExternalThread): JsonObject | null {
+    return thread.goal
+      ? projectThreadGoal({
+          threadId: thread.id,
+          goal: thread.goal,
+          usage: thread.latestUsage,
+          nowMs: Date.now(),
+        })
+      : null;
+  }
+
+  async #writeExternalGoalUpdated(thread: ExternalThread): Promise<void> {
+    const goal = this.#projectExternalGoal(thread);
+    if (!goal) return;
+    await this.#writer.json({
+      method: "thread/goal/updated",
+      params: { threadId: thread.id, turnId: thread.activeTurnId, goal },
+    });
+  }
+
+  async #writeExternalGoalCleared(thread: ExternalThread): Promise<void> {
+    await this.#writer.json({ method: "thread/goal/cleared", params: { threadId: thread.id } });
+  }
+
+  #externalThreadBusy(thread: ExternalThread): boolean {
+    return (
+      thread.running ||
+      thread.activeTurnId !== null ||
+      this.#externalSteering.hasPending(thread.id) ||
+      this.#pendingExternalCommandRequests.has(thread.id)
+    );
+  }
+
+  async #setExternalGoal(
+    request: JsonRpcRequest,
+    thread: ExternalThread,
+    control: HarnessGoalCapability,
+  ): Promise<void> {
+    let params: ReturnType<typeof parseThreadGoalSetParams>;
+    try {
+      params = parseThreadGoalSetParams(request.params);
+    } catch (error) {
+      await this.#writer.json(rpcError(request, -32602, errorMessage(error)));
+      return;
+    }
+    const current = thread.goal;
+    if (params.objective !== null) {
+      if (params.status !== null && params.status !== "active") {
+        await this.#writer.json(
+          rpcError(request, -32602, "A Goal objective can only be set with status active"),
+        );
+        return;
+      }
+      await this.#startExternalGoalTurn(request, thread, control, {
+        objective: params.objective,
+        tokenBudget:
+          params.tokenBudget === undefined ? (current?.tokenBudget ?? null) : params.tokenBudget,
+        createdAtMs:
+          current && current.objective === params.objective ? current.createdAtMs : Date.now(),
+      });
+      return;
+    }
+    if (!current) {
+      await this.#writer.json(
+        rpcError(request, -32602, `cannot update goal for thread ${thread.id}: no goal exists`),
+      );
+      return;
+    }
+    if (
+      params.status === "active" &&
+      current.status !== "active" &&
+      !this.#externalThreadBusy(thread)
+    ) {
+      // Resuming re-registers the objective natively so the Harness starts working again.
+      await this.#startExternalGoalTurn(request, thread, control, {
+        objective: current.objective,
+        tokenBudget: params.tokenBudget === undefined ? current.tokenBudget : params.tokenBudget,
+        createdAtMs: current.createdAtMs,
+      });
+      return;
+    }
+    if (params.status !== null && params.status !== "active" && params.status !== "paused") {
+      await this.#writer.json(
+        rpcError(request, -32602, `Host cannot set External Thread Goal status ${params.status}`),
+      );
+      return;
+    }
+    if (params.status === null && params.tokenBudget === undefined) {
+      await this.#writer.json(rpcError(request, -32602, "thread/goal/set changes nothing"));
+      return;
+    }
+    thread.goal = {
+      ...current,
+      ...(params.status ? { status: params.status } : {}),
+      ...(params.tokenBudget !== undefined ? { tokenBudget: params.tokenBudget } : {}),
+      updatedAtMs: Date.now(),
+    };
+    await this.#writer.json(
+      rpcEnvelope(request, { result: { goal: this.#projectExternalGoal(thread) } }),
+    );
+    await this.#writeExternalGoalUpdated(thread);
+  }
+
+  async #startExternalGoalTurn(
+    request: JsonRpcRequest,
+    thread: ExternalThread,
+    control: HarnessGoalCapability,
+    input: { objective: string; tokenBudget: number | null; createdAtMs: number },
+  ): Promise<void> {
+    if (this.#closeRequested || this.#externalRuntime.get(thread.id) !== thread) {
+      await this.#writer.json(rpcError(request, -32073, "External Thread is no longer available"));
+      return;
+    }
+    if (this.#externalThreadBusy(thread)) {
+      await this.#writer.json(
+        rpcError(request, -32072, "External Thread already has an active Turn"),
+      );
+      return;
+    }
+    const turnId = hostTurnIdSchema.parse(randomUUID());
+    // The Harness starts the Goal Turn itself; Desktop already shows the
+    // objective it typed, so the Turn carries no user input.
+    const projection: ProjectedTurn = {
+      projector: new CodexTurnProjector({
+        threadId: thread.id,
+        turnId,
+        cwd: thread.cwd,
+        startedAtMs: Date.now(),
+      }),
+    };
+    const gate = turnProjectionGate();
+    thread.running = true;
+    thread.activeTurnId = turnId;
+    thread.projectedTurns.set(turnId, projection);
+    thread.responseGates.set(turnId, gate);
+    let result: Awaited<ReturnType<HarnessGoalCapability["set"]>>;
+    try {
+      result = await control.set({ turnId, objective: input.objective });
+    } catch (error) {
+      result = {
+        ok: false,
+        error: { code: "nativeFailure", message: errorMessage(error), retryable: false },
+      };
+    }
+    if (!result.ok) {
+      thread.running = false;
+      thread.activeTurnId = null;
+      thread.projectedTurns.delete(turnId);
+      thread.responseGates.delete(turnId);
+      gate.resolve();
+      await this.#writer.json(
+        rpcError(
+          request,
+          result.error.code === "invalidRequest" ? -32602 : -32073,
+          result.error.message,
+        ),
+      );
+      return;
+    }
+    const nowMs = Date.now();
+    thread.goal = {
+      objective: input.objective,
+      status: "active",
+      tokenBudget: input.tokenBudget,
+      createdAtMs: input.createdAtMs,
+      updatedAtMs: nowMs,
+      tokensAtStart: thread.latestUsage?.totalTokens ?? 0,
+      nativeCleared: false,
+    };
+    try {
+      await this.#writer.json(
+        rpcEnvelope(request, { result: { goal: this.#projectExternalGoal(thread) } }),
+      );
+    } finally {
+      gate.resolve();
+    }
+    await this.#writeExternalGoalUpdated(thread);
+  }
+
+  async #clearExternalGoal(
+    request: JsonRpcRequest,
+    thread: ExternalThread,
+    control: HarnessGoalCapability,
+  ): Promise<void> {
+    const current = thread.goal;
+    if (!current) {
+      await this.#writer.json(rpcEnvelope(request, { result: { cleared: false } }));
+      return;
+    }
+    if (!current.nativeCleared) {
+      if (this.#externalThreadBusy(thread)) {
+        await this.#writer.json(
+          rpcError(request, -32072, "External Thread already has an active Turn"),
+        );
+        return;
+      }
+      const result = await control.clear();
+      if (!result.ok) {
+        await this.#writer.json(rpcError(request, -32073, result.error.message));
+        return;
+      }
+    }
+    await this.#writer.json(rpcEnvelope(request, { result: { cleared: true } }));
+    if (thread.goal !== null) {
+      thread.goal = null;
+      await this.#writeExternalGoalCleared(thread);
+    }
+  }
+
+  async #applyHarnessGoalChange(
+    thread: ExternalThread,
+    event: SessionGoalChangedEvent,
+  ): Promise<void> {
+    thread.goalLoaded = true;
+    const previous = thread.goal;
+    if (event.goal) {
+      const next = externalThreadGoalFromHarness(
+        event.goal,
+        previous,
+        thread.latestUsage,
+        Date.now(),
+      );
+      // Native activity while Host shows paused means the Harness resumed it.
+      if (next.status === "paused" && thread.running) next.status = "active";
+      thread.goal = next;
+      if (
+        previous === null ||
+        previous.objective !== next.objective ||
+        previous.status !== next.status
+      ) {
+        await this.#writeExternalGoalUpdated(thread);
+      }
+      return;
+    }
+    if (!previous) return;
+    const status = settledGoalStatus(event.outcome ?? "cleared");
+    if (event.reason) this.#diagnose(`${thread.harnessId} Goal ${event.outcome}: ${event.reason}`);
+    if (status === null) {
+      thread.goal = null;
+      await this.#writeExternalGoalCleared(thread);
+      return;
+    }
+    thread.goal = { ...previous, status, nativeCleared: true, updatedAtMs: Date.now() };
+    await this.#writeExternalGoalUpdated(thread);
+  }
+
+  /** A failed Goal Turn blocks the Goal; an interrupted one leaves it paused. */
+  async #settleExternalGoalAfterTurn(
+    thread: ExternalThread,
+    outcome: { status: string },
+  ): Promise<void> {
+    const goal = thread.goal;
+    if (!goal || goal.status !== "active" || goal.nativeCleared) return;
+    const status =
+      outcome.status === "failed" ? "blocked" : outcome.status === "cancelled" ? "paused" : null;
+    if (status === null) return;
+    thread.goal = { ...goal, status, updatedAtMs: Date.now() };
+    await this.#writeExternalGoalUpdated(thread);
+  }
+
   async #deleteExternalThread(
     request: JsonRpcRequest,
     location: Extract<ExternalThreadLocation, { kind: "external" }>,
@@ -3808,6 +4156,11 @@ export class AppServerHost {
       }
       return;
     }
+    if (event.type === "session.goal.changed") {
+      if (this.#externalRuntime.get(thread.id) !== thread) return;
+      await this.#applyHarnessGoalChange(thread, event);
+      return;
+    }
     if (event.type === "session.usage.changed") {
       if (this.#externalRuntime.get(thread.id) !== thread) return;
       thread.latestUsage = event.usage;
@@ -3960,6 +4313,7 @@ export class AppServerHost {
     }
     for (const message of result.messages) await this.#writer.json(message);
     if (event.type === "turn.completed") {
+      await this.#settleExternalGoalAfterTurn(thread, event.outcome);
       await this.#setThreadStatus(
         thread,
         this.#hasRunningSubagents(thread.id)

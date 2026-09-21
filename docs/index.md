@@ -41,6 +41,7 @@
 | --- | --- |
 | [`harnesses/claude-code/claude-code-plan-mode.md`](harnesses/claude-code/claude-code-plan-mode.md) | Claude Code 规划模式、计划退出确认与权限状态边界；修改 Plan Mode 时阅读。 |
 | [`harnesses/claude-code/claude-code-edit-recovery.md`](harnesses/claude-code/claude-code-edit-recovery.md) | 最后一条消息编辑后的独立 Session、空历史保留和关闭语义；修改编辑恢复时阅读。 |
+| [`harnesses/claude-code/claude-code-goal.md`](harnesses/claude-code/claude-code-goal.md) | Codex Desktop `/goal` 到 Claude Code 原生 `/goal` 的桥接、Host 状态映射与原生证据来源；修改 Goal 能力时阅读。 |
 
 ### CodeBuddy、WorkBuddy 与 Cursor
 
