@@ -2,6 +2,8 @@
 
 # CodexHost
 
+This repository is TinyYana’s maintained downstream fork of [BytePioneer-AI/codex-host](https://github.com/BytePioneer-AI/codex-host). It continues to follow upstream while retaining changes upstream does not currently provide or plan to adopt. See [Credits / provenance](../../CREDITS.md) for source and contribution lineage.
+
 **Run Pi and other Harnesses inside Codex Desktop**
 
 We believe **Codex Desktop** currently provides the best desktop development experience.
@@ -256,3 +258,4 @@ When adding a Harness, you can have a coding Agent use the in-repo [codexhost-ad
 
 - Thanks to the [LINUX DO](https://linux.do/) community for its continued support.
 - Thanks to the [Paseo](https://github.com/getpaseo/paseo) project for inspiring and informing the multi-Harness integration approach and architecture.
+- Thanks to upstream and contributors including SuperGoodGame and daodao97, OpenCodex for reused implementation, and claude-fuel and cc-switch for algorithm and design references. See [Credits / provenance](../../CREDITS.md) for attribution, scope and licenses.

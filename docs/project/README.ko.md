@@ -2,6 +2,8 @@
 
 # CodexHost
 
+이 저장소는 [BytePioneer-AI/codex-host](https://github.com/BytePioneer-AI/codex-host)를 지속적으로 따라가는 TinyYana의 maintained downstream fork입니다. upstream이 현재 제공하지 않거나 채택할 계획이 없는 변경도 유지합니다. 출처와 기여 이력은 [Credits / provenance](../../CREDITS.md)를 참고하세요.
+
 **Codex Desktop에서 Pi와 다른 Harness를 실행하세요**
 
 저희는 **Codex Desktop**이 현재 최고의 데스크톱 개발 경험을 제공한다고 생각합니다.
@@ -256,3 +258,4 @@ Harness를 추가할 때는 코딩 Agent가 저장소의 [codexhost-add-harness 
 
 - 지속적인 지원을 보내 주신 [LINUX DO](https://linux.do/) 커뮤니티에 감사드립니다.
 - 멀티 Harness 통합 방식과 아키텍처에 영감을 주고 참고가 된 [Paseo](https://github.com/getpaseo/paseo) 프로젝트에 감사드립니다.
+- upstream과 SuperGoodGame, daodao97 등 기여자, 구현을 재사용한 OpenCodex, 알고리즘과 설계를 참고한 claude-fuel 및 cc-switch에 감사드립니다. 분류, 기여자와 라이선스는 [Credits / provenance](../../CREDITS.md)를 참고하세요.

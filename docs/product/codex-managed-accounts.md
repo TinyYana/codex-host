@@ -1,5 +1,7 @@
 # Codex 多帳號、額度 Ranking 與安全切換
 
+来源、贡献 lineage 与许可证统一记录在 [Credits / provenance](../../CREDITS.md)；本文维护当前行为与设计。
+
 CodexHost 可以管理多個 ChatGPT/Codex 帳號：保存、列出、並排看額度、手動或自動切換、刪除非目前帳號。全程不需要離開 CodexHost 去登出再登入。產品契約見 `openspec/changes/add-codex-managed-accounts/`；它取代了 `remove-codex-multi-account` 的「Host 不管多帳號」邊界。設定頁的版面與其他 Harness 唯讀列見 [帳號與額度設定](codex-accounts.md)。
 
 Account 仍然只是認證身分，不等於 Harness、Model、Provider 或 Billing Source。這裡沒有 per-Thread 帳號路由、沒有 per-帳號 backend pool、沒有 Model proxy：整個 Host 同一時間只有一個目前 Codex 帳號。

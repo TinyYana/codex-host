@@ -119,3 +119,7 @@ npm run test --workspace=@codexhost/repository-automation
 ```
 
 定向测试覆盖标题与标签所有权、CI 完整性、等待/失败/恢复、日志提取与脱敏、分页、只读预览、过期快照和发布校验。真实 Actions 写入测试需部署到可信分支并明确启用后执行。
+
+## 外部来源与贡献记录
+
+[Credits / provenance](../../CREDITS.md) 是来源分类的 Source of Truth。引入 substantial 外部代码、重落贡献或明确算法来源时，在同一变更中更新该入口，记录固定 revision、当前路径、采用范围与许可证；完整 license 留在对应 notice 目录，随产品分发的内容同步检查 installer/npm notice。设计文档只链接来源记录并维护行为，不复制完整清单。移除实现时将对应范围改为历史来源，仍存续的代码和 attribution 不能一并删掉。

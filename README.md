@@ -2,6 +2,8 @@
 
 # CodexHost
 
+本仓库是 [BytePioneer-AI/codex-host](https://github.com/BytePioneer-AI/codex-host) 的 maintained downstream fork，由 TinyYana 持续跟进 upstream，同时保留 upstream 目前未提供或没有计划采纳的修改。来源与贡献记录见 [Credits / provenance](CREDITS.md)。
+
 **在 Codex Desktop 中运行 Pi 和其他 Harness**
 
 我们认为 **Codex Desktop** 提供了目前最好的桌面开发交互体验。
@@ -265,6 +267,7 @@ npm start
 
 - 感谢 [LINUX DO](https://linux.do/) 社区一直以来的支持。
 - 感谢 [Paseo](https://github.com/getpaseo/paseo) 项目在多 Harness 接入思路与架构设计方面带来的启发与参考。
+- 感谢 upstream 及 SuperGoodGame、daodao97 等贡献者、OpenCodex 的复用实现，以及 claude-fuel、cc-switch 的算法与设计参考。完整分类、贡献者和许可证入口见 [Credits / provenance](CREDITS.md)。
 
 ## Star History
 

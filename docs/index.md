@@ -4,6 +4,8 @@
 
 ## 项目入口
 
+[Credits / provenance](../CREDITS.md) 是 upstream、重落贡献、外部复用、设计参考及历史来源的统一入口。
+
 | 文档 | 内容与阅读时机 |
 | --- | --- |
 | [`project/README.en.md`](project/README.en.md) | 英文项目介绍、安装方式和功能概览；维护英文用户入口时阅读。 |

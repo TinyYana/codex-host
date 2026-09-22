@@ -1,5 +1,7 @@
 # Claude Code Goal 桥接
 
+来源、贡献 lineage 与许可证统一记录在 [Credits / provenance](../../../CREDITS.md)；本文维护当前行为与设计。
+
 Codex Desktop 的 `/goal` 输入框和「Pursuing goal / Goal achieved / Goal stalled」状态条通过 app-server 方法 `thread/goal/set`、`thread/goal/get`、`thread/goal/clear` 与通知 `thread/goal/updated`、`thread/goal/cleared` 工作。codexhost 此前对外部 Thread 一律返回 `-32076`，Desktop 因此提示 "Failed to set goal"，并在每次 `thread/resume` 后记录 "Failed to hydrate thread goal"。
 
 codexhost 把这组方法**桥接到 Harness 自己的 Goal**，不在 Host 侧自造续跑循环：Harness 拥有 Goal 是否存在、如何评估、何时结束；Host 只补足 Desktop 需要而 Harness 没有原生表示的状态（`paused`、token 预算与用量基线），并把原生证据投影成 Codex 的 `ThreadGoal`。

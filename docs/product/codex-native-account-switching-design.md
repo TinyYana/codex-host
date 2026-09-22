@@ -1,5 +1,7 @@
 # Codex 帳號切換的設計邊界
 
+来源、贡献 lineage 与许可证统一记录在 [Credits / provenance](../../CREDITS.md)；本文维护当前行为与设计。
+
 CodexHost 以「單一正式 `CODEX_HOME`、單一自有官方 backend、多份保存的 credential」提供全域 Codex 帳號切換。Account 是認證身分，不等於 Harness、Model、Provider 或 Billing Source；不建立 Model proxy、per-帳號 backend pool 或 per-Thread 帳號路由。
 
 歷史脈絡：PR #117 做過 per-帳號 `CODEX_HOME` + runtime pool，被 PR #262 的原生全域切換取代；`f3592bdb` 曾把 Host 多帳號整個移除，只留唯讀額度頁（`openspec/changes/remove-codex-multi-account/`）。現行契約 `openspec/changes/add-codex-managed-accounts/` 取代了那次移除，範圍比 #262 窄：

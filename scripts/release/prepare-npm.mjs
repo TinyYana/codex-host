@@ -828,6 +828,7 @@ export async function writeThirdPartyNotices(root, packageRoot) {
   );
   notices.push(
     "opencodex native profiles (2d4d7a22381a2e497c2442902104619e25f937c7)",
+    "Source: https://github.com/lidge-jun/opencodex/tree/2d4d7a22381a2e497c2442902104619e25f937c7",
     "License: MIT",
     "License text: licenses/opencodex-LICENSE.txt",
     "",
