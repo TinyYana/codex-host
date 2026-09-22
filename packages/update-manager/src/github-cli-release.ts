@@ -1,9 +1,12 @@
 import { execFile } from "node:child_process";
 import path from "node:path";
 
-import { parseLatestGitHubRelease, type CodexhostLatestRelease } from "./github-release.js";
+import {
+  parseLatestGitHubRelease,
+  type CodexhostLatestRelease,
+  type CodexhostReleaseRepository,
+} from "./github-release.js";
 
-const GITHUB_LATEST_RELEASE_ENDPOINT = "repos/BytePioneer-AI/codex-host/releases/latest";
 const MAX_RELEASE_RESPONSE_BYTES = 1024 * 1024;
 const GITHUB_CLI_TIMEOUT_MS = 5_000;
 
@@ -24,6 +27,7 @@ export interface GitHubCliReleaseFetchOptions {
   signal?: AbortSignal;
   executableCandidates?: readonly string[];
   run?: GitHubCliRunner;
+  repository?: CodexhostReleaseRepository;
 }
 
 function defaultExecutableCandidates(
@@ -96,7 +100,7 @@ export async function fetchLatestGitHubReleaseWithGitHubCli(
     "Accept: application/vnd.github+json",
     "--header",
     "X-GitHub-Api-Version: 2022-11-28",
-    GITHUB_LATEST_RELEASE_ENDPOINT,
+    `repos/${options.repository ?? "BytePioneer-AI/codex-host"}/releases/latest`,
   ] as const;
 
   for (const executable of candidates) {

@@ -63,12 +63,20 @@ function isWindowsRenderer(window: Window | null | undefined): boolean {
   return /windows|win32|win64/iu.test(identity);
 }
 
-function windowsInstallerDownloadUrl(window: Window | null | undefined, version: string): string {
+function windowsInstallerDownloadUrl(
+  window: Window | null | undefined,
+  version: string,
+  releaseNotesUrl: string | null,
+): string {
   const navigator = window?.navigator;
   const hints = navigator ? rendererUserAgentData(navigator) : undefined;
   const identity = `${hints?.architecture ?? ""} ${hints?.platform ?? ""} ${navigator?.platform ?? ""} ${navigator?.userAgent ?? ""}`;
   const architecture = /arm64|aarch64|\barm\b/iu.test(identity) ? "arm64" : "x64";
-  return `https://github.com/BytePioneer-AI/codex-host/releases/download/v${version}/codexhost-${version}-windows-${architecture}.exe`;
+  // The newest Release may come from the fork or upstream; download from the one it names.
+  const download = releaseNotesUrl
+    ? releaseNotesUrl.replace("/releases/tag/", "/releases/download/")
+    : `${CODEXHOST_GITHUB_REPOSITORY_URL}/releases/download/v${version}`;
+  return `${download}/codexhost-${version}-windows-${architecture}.exe`;
 }
 
 export const DEFAULT_RENDERER_SETTINGS_PAGE_IDS = [
@@ -480,6 +488,7 @@ function updatesPage(
           manualWindowsInstallerLink.href = windowsInstallerDownloadUrl(
             document.defaultView,
             result.latestVersion,
+            result.releaseNotesUrl,
           );
         }
         if (result.releaseNotesUrl) releaseLink.href = result.releaseNotesUrl;

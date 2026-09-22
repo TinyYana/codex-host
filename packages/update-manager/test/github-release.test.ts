@@ -6,6 +6,7 @@ import {
   expectedInstallerAssetName,
   fetchLatestGitHubRelease,
   fetchLatestGitHubReleaseWithGitHubCli,
+  newestRelease,
   parseLatestGitHubRelease,
   selectInstallerReleaseArtifact,
   type GitHubCliRunner,
@@ -49,6 +50,36 @@ describe("GitHub Release update discovery", () => {
     expect(expectedInstallerAssetName("1.2.3", "macos-arm64")).toBe(
       "codexhost-1.2.3-macos-arm64.dmg",
     );
+  });
+
+  it("accepts the fork as a second source and keeps each download inside its own repository", () => {
+    const forkUrl = "https://github.com/TinyYana/codex-host/releases";
+    const forkAsset = {
+      ...release().assets[0],
+      browser_download_url: `${forkUrl}/download/v1.2.3/codexhost-1.2.3-windows-x64.exe`,
+    };
+    const fork = parseLatestGitHubRelease(
+      release({ html_url: `${forkUrl}/tag/v1.2.3`, assets: [forkAsset] }),
+    );
+    expect(selectInstallerReleaseArtifact(fork, "windows-x64").source.url).toBe(
+      forkAsset.browser_download_url,
+    );
+    // A fork Release must not point its installer at upstream downloads, or the reverse.
+    expect(() => parseLatestGitHubRelease(release({ html_url: `${forkUrl}/tag/v1.2.3` }))).toThrow(
+      "asset is invalid",
+    );
+    // Newest wins; on a tie the earlier (fork) source is kept.
+    const upstream = parseLatestGitHubRelease(release());
+    expect(newestRelease([fork, upstream])).toBe(fork);
+    const newer = parseLatestGitHubRelease(
+      release({
+        tag_name: "v1.2.4",
+        html_url: "https://github.com/BytePioneer-AI/codex-host/releases/tag/v1.2.4",
+        assets: [],
+      }),
+    );
+    expect(newestRelease([fork, newer])).toBe(newer);
+    expect(newestRelease([])).toBeNull();
   });
 
   it("rejects prereleases, mismatched notes, duplicate assets, and unverified selection", () => {

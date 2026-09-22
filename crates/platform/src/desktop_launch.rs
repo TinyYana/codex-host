@@ -31,8 +31,9 @@ pub type DesktopProcess = super::windows_desktop::WindowsDesktopProcess;
 #[cfg(not(target_os = "windows"))]
 pub type DesktopProcess = Child;
 
+// The fork's own Releases; its builds are what this binary ships as.
 const CODEXHOST_RELEASES_LATEST_URL: &str =
-    "https://github.com/BytePioneer-AI/codex-host/releases/latest";
+    "https://github.com/TinyYana/codex-host/releases/latest";
 const REMOTE_SSH_MANAGED_ENV: &str = "CODEXHOST_REMOTE_SSH_MANAGED";
 const REMOTE_PROFILE_ONLY_ENVIRONMENT: [&str; 3] = [
     "CODEX_INSTALL_DIR",

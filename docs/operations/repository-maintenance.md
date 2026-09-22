@@ -106,6 +106,12 @@ npm 发布受阻时，可从默认分支手动运行 `Release packages`，指定
 
 标签推送使用标签提交里的工作流定义，新校验不会追溯改写旧标签的发布逻辑。这不是不可绕过的权限控制；未设置分支、标签或发布环境保护。
 
+### Fork 的發布與雙重更新來源
+
+TinyYana/codex-host 是 hard fork：Release 只發在 fork，一律用上面的 `skip_npm` 手動觸發（npm 套件 `codexhost` 屬於上游，fork 的 trusted publishing 也不成立）。推送 tag 時自動觸發的那次 run 會嘗試 npm 發布，應立即取消。
+
+應用程式內的更新檢查同時讀取 fork 與上游的 latest Release（`CODEXHOST_RELEASE_REPOSITORIES`，fork 在前），取版本較新的一個；版本相同時保留 fork，避免上游同版號覆蓋 fork 版。任一來源無法連線或沒有 Release 時只用另一個。安裝檔必須從所選 Release 同一個 repository 的 `releases/download/` 下載，不接受跨 repository 的資產網址。
+
 ## 验证
 
 ```bash

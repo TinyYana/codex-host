@@ -14,13 +14,17 @@ export {
 } from "./distribution.js";
 export {
   CODEXHOST_LATEST_RELEASE_URL,
+  CODEXHOST_RELEASE_REPOSITORIES,
+  codexhostLatestReleaseUrl,
   compareSemanticVersions,
   expectedInstallerAssetName,
   fetchLatestGitHubRelease,
+  newestRelease,
   parseLatestGitHubRelease,
   selectInstallerReleaseArtifact,
   type CodexhostLatestRelease,
   type CodexhostReleaseAsset,
+  type CodexhostReleaseRepository,
   type GitHubReleaseFetchOptions,
   type InstallerReleaseTarget,
   type SelectedReleaseArtifact,
