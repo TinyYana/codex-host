@@ -70,6 +70,25 @@ describe("inactive account quotas", () => {
     });
     expect(quotas.credentialUsable(b)).toBe(true);
   });
+  it("lifts the quarantine once a native re-login replaces the rejected grant", async () => {
+    const { store } = await setup();
+    await store.install(credential("a"));
+    await store.captureCurrent();
+    const b = await store.save(credential("b", 1, 1));
+    const quotas = new NativeAccountQuotas({
+      directory: store.directory,
+      credentials: store,
+      fetch: async () => new Response("{}", { status: 400 }),
+    });
+    await expect(
+      quotas.inspect(required(store.vault.accounts.find((a) => a.accountId === b)), true),
+    ).rejects.toMatchObject({ code: "unavailable" });
+    expect(quotas.credentialUsable(b)).toBe(false);
+    // Re-login as B in native Codex; the passive capture updates the saved grant.
+    await store.install(credential("b", 2));
+    await store.captureCurrent("update-saved");
+    expect(quotas.credentialUsable(b)).toBe(true);
+  });
   it("refreshes only B's saved grant without overwriting C or permanent auth", async () => {
     const { store, runtime } = await setup();
     await store.install(credential("a"));

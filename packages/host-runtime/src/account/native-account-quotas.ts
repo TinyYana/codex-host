@@ -264,8 +264,8 @@ export class NativeAccountQuotas {
   readonly #quotaFlights = new Map<string, Promise<CodexAccountUsageResult>>();
   readonly #refreshFlights = new Map<string, Promise<NativeCodexCredentials>>();
   readonly #snapshots = new Map<string, QuotaSnapshot>();
-  /** Accounts whose last token refresh was rejected; cleared by any successful live read. */
-  readonly #authFailed = new Set<string>();
+  /** Saved grant whose token refresh was rejected, per Account; a newer saved grant lifts it. */
+  readonly #authFailed = new Map<string, string | null>();
   #mutations: Promise<void> = Promise.resolve();
 
   constructor(input: {
@@ -298,7 +298,12 @@ export class NativeAccountQuotas {
   }
 
   credentialUsable(accountId: string): boolean {
-    return !this.#authFailed.has(accountId);
+    if (!this.#authFailed.has(accountId)) return true;
+    // A native re-login captured into the vault replaces the rejected grant.
+    const saved = this.#credentials.ready
+      ? this.#credentials.vault.accounts.find((a) => a.accountId === accountId)?.auth
+      : undefined;
+    return saved !== undefined && saved !== this.#authFailed.get(accountId);
   }
 
   get(accountId: string): CodexAccountUsageResult | null {
@@ -406,7 +411,7 @@ export class NativeAccountQuotas {
       });
     } catch (error) {
       if (error instanceof CodexAccountQuotaError && error.code === "authentication")
-        this.#authFailed.add(account.accountId);
+        this.#authFailed.set(account.accountId, account.auth);
       if (previous) return previous;
       throw new CodexAccountQuotaError("unavailable");
     }

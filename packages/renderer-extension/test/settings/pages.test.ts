@@ -143,6 +143,7 @@ class FakeElement {
 
 class FakeDocument {
   readonly clipboardWriteText = vi.fn(async () => undefined);
+  readonly windowOpen = vi.fn();
   readonly defaultView: Window;
 
   constructor(platform = "MacIntel") {
@@ -158,6 +159,7 @@ class FakeDocument {
       clearInterval: vi.fn(),
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
+      open: this.windowOpen,
     } as unknown as Window;
   }
 
@@ -1176,7 +1178,7 @@ describe("Renderer Codex Account management", () => {
       signal: scope.signal,
       runLatest: (operation, handlers) => scope.runLatest(operation, handlers),
     });
-    return { content, scope };
+    return { content, scope, document };
   };
   const buttons = (root: FakeElement): FakeElement[] =>
     descendants(root).filter(({ tagName, hidden }) => tagName === "button" && !hidden);
@@ -1259,6 +1261,32 @@ describe("Renderer Codex Account management", () => {
       "home",
     ]);
     expect(visibleText(rowOf(content, "work"))).toContain("—");
+    scope.dispose();
+  });
+
+  it("starts the official login for an Account that needs to sign in again", async () => {
+    const client = {
+      listCodexAccounts: vi.fn(async () =>
+        managed("home", 1, { accounts: [home, { ...work, requiresLogin: true }] }),
+      ),
+      switchCodexAccount: vi.fn(),
+      startCodexLogin: vi.fn(async () => ({ authUrl: "https://auth.openai.com/login" })),
+    };
+    const { content, scope, document } = mountAccounts(client);
+    await vi.waitFor(() => expect(rowButton(content, "work", "relogin")).not.toBeNull());
+    // Re-login replaces Switch; nothing has to be removed and saved again.
+    expect(rowButton(content, "work", "switch")).toBeNull();
+    rowButton(content, "work", "relogin")?.dispatch("click");
+    await vi.waitFor(() =>
+      expect(document.windowOpen).toHaveBeenCalledExactlyOnceWith(
+        "https://auth.openai.com/login",
+        "_blank",
+        "noopener,noreferrer",
+      ),
+    );
+    expect(client.startCodexLogin).toHaveBeenCalledOnce();
+    expect(client.switchCodexAccount).not.toHaveBeenCalled();
+    expect(visibleText(content)).toContain("official sign-in page opened");
     scope.dispose();
   });
 

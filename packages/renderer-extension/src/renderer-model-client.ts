@@ -158,6 +158,8 @@ export const CODEX_ACCOUNT_DELETE_METHOD = "codexhost/account/delete";
 export const CODEX_ACCOUNT_RECOVER_METHOD = "codexhost/account/recover";
 export const CODEX_ACCOUNT_AUTO_UPDATE_METHOD = "codexhost/account/auto/update";
 export const CODEX_ACCOUNT_RANKING_INSPECT_METHOD = "codexhost/account/ranking/inspect";
+/** Official native login; the Host forwards it unchanged to the Codex backend. */
+export const CODEX_LOGIN_START_METHOD = "account/login/start";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -235,6 +237,8 @@ export interface RendererModelClient extends Partial<RendererSessionImportClient
   recoverCodexAccounts?(): Promise<CodexAccountMutationResult>;
   updateCodexAccountAuto?(input: CodexAccountAutoUpdateParams): Promise<CodexAccountMutationResult>;
   inspectCodexAccountRanking?(input?: { refresh?: boolean }): Promise<CodexAccountRankingResult>;
+  /** Starts the official ChatGPT browser login; the caller opens the returned URL. */
+  startCodexLogin?(): Promise<{ authUrl: string }>;
   subscribeCodexTurnFailures?(listener: (failure: CodexTurnFailure) => void): () => void;
 }
 
@@ -612,6 +616,13 @@ export function createRendererModelClient(
         input.refresh === true ? { refresh: true } : {},
       );
       return codexAccountRankingResultSchema.parse(result);
+    },
+    async startCodexLogin(): Promise<{ authUrl: string }> {
+      const result = await manager.sendRequest(CODEX_LOGIN_START_METHOD, { type: "chatgpt" });
+      const authUrl = isRecord(result) ? result.authUrl : undefined;
+      if (typeof authUrl !== "string" || !/^https:\/\//u.test(authUrl))
+        throw new Error("Codex login did not return a browser URL");
+      return { authUrl };
     },
     subscribeCodexTurnFailures(listener: (failure: CodexTurnFailure) => void): () => void {
       const notifications = notificationTarget(source);

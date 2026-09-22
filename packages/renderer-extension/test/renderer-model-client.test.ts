@@ -458,6 +458,7 @@ describe("Renderer fixed Model request client", () => {
       "selectThreadThinking",
       "setHarnessLaunchSettings",
       "setIdleReleaseSettings",
+      "startCodexLogin",
       "startUpdate",
       "subscribeCodexAccounts",
       "subscribeCodexTurnFailures",

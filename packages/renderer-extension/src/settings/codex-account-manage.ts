@@ -30,6 +30,7 @@ export interface RendererCodexAccountManageClient {
   recoverCodexAccounts?(): Promise<CodexAccountMutationResult>;
   updateCodexAccountAuto?(input: CodexAccountAutoUpdateParams): Promise<CodexAccountMutationResult>;
   inspectCodexAccountRanking?(input?: { refresh?: boolean }): Promise<CodexAccountRankingResult>;
+  startCodexLogin?(): Promise<{ authUrl: string }>;
 }
 
 export type CodexAccountManageSnapshot = Pick<
@@ -176,6 +177,31 @@ export function mountCodexAccountManagement(input: {
         return name ? text.switched.replace("{name}", name) : null;
       },
     );
+
+  // Official native login: the browser flow outlives this click, and the Host picks up the
+  // renewed grant from `account/login/completed`, so no Host mutation is held open here.
+  const relogin = (account: CodexAccountSummary): void => {
+    const start = input.getClient()?.startCodexLogin;
+    if (busy() || signal.aborted || !start) return;
+    const name = codexAccountDisplayName(account).full;
+    notice = null;
+    input.render();
+    void Promise.resolve()
+      .then(() => start())
+      .then(
+        ({ authUrl }) => {
+          if (signal.aborted) return;
+          document.defaultView?.open(authUrl, "_blank", "noopener,noreferrer");
+          notice = { tone: "info", text: text.reloginStarted.replace("{name}", name) };
+          input.render();
+        },
+        () => {
+          if (signal.aborted) return;
+          notice = { tone: "error", text: text.failed };
+          input.render();
+        },
+      );
+  };
 
   const confirmDelete = (account: CodexAccountSummary): void => {
     if (busy() || confirmDialog || signal.aborted) return;
@@ -371,7 +397,18 @@ export function mountCodexAccountManagement(input: {
     const actions: HTMLButtonElement[] = [];
     const isBusy = busy();
     if (account.saved === true && !isCurrent) {
-      if (capabilities.switch) {
+      if (account.requiresLogin && input.getClient()?.startCodexLogin) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "settings-account-action";
+        button.dataset.accountFocus = `${account.accountId}:relogin`;
+        button.dataset.codexAccountAction = "relogin";
+        button.textContent = text.reloginAction;
+        button.setAttribute("aria-label", text.reloginLabel.replace("{name}", name));
+        button.disabled = isBusy;
+        button.addEventListener("click", () => relogin(account));
+        actions.push(button);
+      } else if (capabilities.switch) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "settings-account-action";
@@ -382,7 +419,6 @@ export function mountCodexAccountManagement(input: {
             : text.switchAction;
         button.setAttribute("aria-label", text.switchLabel.replace("{name}", name));
         button.disabled = isBusy || account.requiresLogin === true;
-        if (account.requiresLogin) button.title = text.requiresLoginHint;
         button.addEventListener("click", () => switchAccount(account));
         actions.push(button);
       }

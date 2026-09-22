@@ -5,7 +5,11 @@ export const codexAccountEnglish = {
   unsavedBadge: "Not saved",
   requiresLoginBadge: "Sign-in needed",
   requiresLoginHint:
-    "The saved sign-in no longer works. Sign in to this account in Codex Desktop, then save it again.",
+    "The saved sign-in no longer works. Choose Sign in again in Settings → Accounts to renew it.",
+  reloginAction: "Sign in again",
+  reloginLabel: "Sign in to {name} again",
+  reloginStarted:
+    "The official sign-in page opened in your browser. Sign in as {name}; Codex then uses this account and the list updates by itself.",
   saveCurrent: "Save current account",
   saving: "Saving…",
   saved: "Current account saved.",
@@ -96,7 +100,11 @@ export type CodexAccountMessages = typeof codexAccountEnglish;
 export const codexAccountChinese: CodexAccountMessages = {
   unsavedBadge: "尚未保存",
   requiresLoginBadge: "需重新登入",
-  requiresLoginHint: "已保存的登入已失效。請在 Codex Desktop 重新登入這個帳號，再回來保存一次。",
+  requiresLoginHint: "已保存的登入已失效。到「設定 → 帳號」按「重新登入」即可更新。",
+  reloginAction: "重新登入",
+  reloginLabel: "重新登入 {name}",
+  reloginStarted:
+    "已在瀏覽器開啟官方登入頁。請以 {name} 登入；完成後 Codex 會改用這個帳號，清單會自動更新。",
   saveCurrent: "保存目前帳號",
   saving: "正在保存…",
   saved: "已保存目前帳號。",

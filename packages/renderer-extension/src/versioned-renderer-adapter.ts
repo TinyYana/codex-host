@@ -1060,6 +1060,11 @@ export function installCurrentRendererAdapter(): {
       if (!client.inspectCodexAccountRanking) throw new Error(CODEX_ACCOUNT_MANAGEMENT_UNAVAILABLE);
       return client.inspectCodexAccountRanking(input);
     },
+    startCodexLogin: () => {
+      const client = currentModelClient();
+      if (!client.startCodexLogin) throw new Error(CODEX_ACCOUNT_MANAGEMENT_UNAVAILABLE);
+      return client.startCodexLogin();
+    },
   });
   const forkControl = installRendererForkControl({
     getClient: () => modelControl,

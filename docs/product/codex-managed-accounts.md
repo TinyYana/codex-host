@@ -56,7 +56,7 @@ Account 仍然只是認證身分，不等於 Harness、Model、Provider 或 Bill
 - 目前帳號：官方 `account/rateLimits/read`（既有路徑與 15 秒快取）。讀到的 live 額度會順手記進保存帳號的快取，切走之後仍有「最後已知」的數字。
 - 已保存、非目前帳號：`native-account-quotas.ts` 以該帳號自己的 credential 唯讀查詢 ChatGPT usage 端點，視窗長度對應 5h／7d，其他視窗保留為具名的 product 視窗（不丟、不合併）。access token 過期時，以 per-帳號 single-flight 方式刷新，並把新 token 寫回 vault 的那一份（保留未知欄位）。快取 5 分鐘、磁碟快取最長 6 小時、回應大小有上限。
 - **unknown 就是 unknown**：查不到時回空的觀測（沒有百分比），UI 顯示「—」，不會補成已用 0% 或剩餘 100%。不同帳號、不同方案的百分比不會被加總。
-- refresh token 被拒絕時，該帳號標為 `requiresLogin`：列表提示需要用官方登入重新登入，Ranker 不會自動選它。
+- refresh token 被拒絕時，該帳號標為 `requiresLogin`，Ranker 不會自動選它。設定頁該列的「重新登入」會送出官方 `account/login/start`（`type: "chatgpt"`）並在瀏覽器開啟回傳的 `authUrl`；登入完成後原生 Codex 改用該帳號，Host 被動捕捉到新 grant 就解除標記，不必刪除重存。標記綁定被拒絕的那份 grant，換了新 grant 即失效。
 
 `codexhost/account/usage/inspect {accountId}` 對任何已保存帳號都可用，所以設定頁能同時顯示每個帳號各自的 5h、7d 與重置時間。
 
