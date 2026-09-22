@@ -29,6 +29,11 @@ import {
   type CodexAccountUsageResult,
   codexAccountChangedSchema,
   codexAccountListResultSchema,
+  codexAccountAutoUpdateParamsSchema,
+  codexAccountDeleteParamsSchema,
+  codexAccountMutationResultSchema,
+  codexAccountRankingResultSchema,
+  codexAccountSwitchParamsSchema,
   externalThreadForkParamsSchema,
   externalThreadForkResultSchema,
   harnessCommandCatalogSchema,
@@ -60,8 +65,13 @@ import {
   updateStatusResultSchema,
   type ExternalThreadForkParams,
   type ExternalThreadForkResult,
+  type CodexAccountAutoUpdateParams,
   type CodexAccountChanged,
+  type CodexAccountDeleteParams,
   type CodexAccountListResult,
+  type CodexAccountMutationResult,
+  type CodexAccountRankingResult,
+  type CodexAccountSwitchParams,
   type HarnessCommandCatalog,
   type HarnessCommandsInspectParams,
   type HarnessConfigurationState,
@@ -90,6 +100,10 @@ import {
   createRendererRequestSender,
   RendererMethodUnavailableError,
 } from "./renderer-request-sender.js";
+import {
+  codexTurnFailureFromNotification,
+  type CodexTurnFailure,
+} from "./renderer-codex-turn-failure.js";
 import {
   createRendererSessionImportClient,
   type RendererSessionImportClient,
@@ -138,6 +152,14 @@ export const UPDATE_STATUS_METHOD = "codexhost/update/status";
 export const CODEX_ACCOUNT_LIST_METHOD = "codexhost/account/list";
 export const CODEX_ACCOUNT_REFRESH_METHOD = "codexhost/account/refresh";
 export const CODEX_ACCOUNT_CHANGED_METHOD = "codexhost/account/changed";
+export const CODEX_ACCOUNT_SAVE_CURRENT_METHOD = "codexhost/account/save-current";
+export const CODEX_ACCOUNT_SWITCH_METHOD = "codexhost/account/switch";
+export const CODEX_ACCOUNT_DELETE_METHOD = "codexhost/account/delete";
+export const CODEX_ACCOUNT_RECOVER_METHOD = "codexhost/account/recover";
+export const CODEX_ACCOUNT_AUTO_UPDATE_METHOD = "codexhost/account/auto/update";
+export const CODEX_ACCOUNT_RANKING_INSPECT_METHOD = "codexhost/account/ranking/inspect";
+/** Official native login; the Host forwards it unchanged to the Codex backend. */
+export const CODEX_LOGIN_START_METHOD = "account/login/start";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -208,6 +230,16 @@ export interface RendererModelClient extends Partial<RendererSessionImportClient
   listCodexAccounts(): Promise<CodexAccountListResult>;
   refreshCodexAccounts(): Promise<CodexAccountListResult>;
   subscribeCodexAccounts?(listener: (state: CodexAccountChanged) => void): () => void;
+  /** Codex Account management. Absent on Hosts without it; every mutation answers with the list. */
+  saveCurrentCodexAccount?(): Promise<CodexAccountMutationResult>;
+  switchCodexAccount?(input: CodexAccountSwitchParams): Promise<CodexAccountMutationResult>;
+  deleteCodexAccount?(input: CodexAccountDeleteParams): Promise<CodexAccountMutationResult>;
+  recoverCodexAccounts?(): Promise<CodexAccountMutationResult>;
+  updateCodexAccountAuto?(input: CodexAccountAutoUpdateParams): Promise<CodexAccountMutationResult>;
+  inspectCodexAccountRanking?(input?: { refresh?: boolean }): Promise<CodexAccountRankingResult>;
+  /** Starts the official ChatGPT browser login; the caller opens the returned URL. */
+  startCodexLogin?(): Promise<{ authUrl: string }>;
+  subscribeCodexTurnFailures?(listener: (failure: CodexTurnFailure) => void): () => void;
 }
 
 export function createThreadUsageSubscriptionRelay(): {
@@ -543,6 +575,63 @@ export function createRendererModelClient(
         if (!isRecord(notification) || notification.method !== CODEX_ACCOUNT_CHANGED_METHOD) return;
         const state = codexAccountChangedSchema.safeParse(notification.params);
         if (state.success) listener(state.data);
+      });
+    },
+    async saveCurrentCodexAccount(): Promise<CodexAccountMutationResult> {
+      const result = await manager.sendRequest(CODEX_ACCOUNT_SAVE_CURRENT_METHOD, {});
+      return codexAccountMutationResultSchema.parse(result);
+    },
+    async switchCodexAccount(input: CodexAccountSwitchParams): Promise<CodexAccountMutationResult> {
+      const result = await manager.sendRequest(
+        CODEX_ACCOUNT_SWITCH_METHOD,
+        codexAccountSwitchParamsSchema.parse(input),
+      );
+      return codexAccountMutationResultSchema.parse(result);
+    },
+    async deleteCodexAccount(input: CodexAccountDeleteParams): Promise<CodexAccountMutationResult> {
+      const result = await manager.sendRequest(
+        CODEX_ACCOUNT_DELETE_METHOD,
+        codexAccountDeleteParamsSchema.parse(input),
+      );
+      return codexAccountMutationResultSchema.parse(result);
+    },
+    async recoverCodexAccounts(): Promise<CodexAccountMutationResult> {
+      const result = await manager.sendRequest(CODEX_ACCOUNT_RECOVER_METHOD, {});
+      return codexAccountMutationResultSchema.parse(result);
+    },
+    async updateCodexAccountAuto(
+      input: CodexAccountAutoUpdateParams,
+    ): Promise<CodexAccountMutationResult> {
+      const result = await manager.sendRequest(
+        CODEX_ACCOUNT_AUTO_UPDATE_METHOD,
+        codexAccountAutoUpdateParamsSchema.parse(input),
+      );
+      return codexAccountMutationResultSchema.parse(result);
+    },
+    async inspectCodexAccountRanking(
+      input: { refresh?: boolean } = {},
+    ): Promise<CodexAccountRankingResult> {
+      const result = await manager.sendRequest(
+        CODEX_ACCOUNT_RANKING_INSPECT_METHOD,
+        input.refresh === true ? { refresh: true } : {},
+      );
+      return codexAccountRankingResultSchema.parse(result);
+    },
+    async startCodexLogin(): Promise<{ authUrl: string }> {
+      const result = await manager.sendRequest(CODEX_LOGIN_START_METHOD, { type: "chatgpt" });
+      const authUrl = isRecord(result) ? result.authUrl : undefined;
+      if (typeof authUrl !== "string" || !/^https:\/\//u.test(authUrl))
+        throw new Error("Codex login did not return a browser URL");
+      return { authUrl };
+    },
+    subscribeCodexTurnFailures(listener: (failure: CodexTurnFailure) => void): () => void {
+      const notifications = notificationTarget(source);
+      if (!notifications?.addNotificationCallback) {
+        throw new Error("Renderer Turn notification callback is unavailable");
+      }
+      return notifications.addNotificationCallback(TURN_COMPLETED_METHOD, (notification) => {
+        const failure = codexTurnFailureFromNotification(notification);
+        if (failure) listener(failure);
       });
     },
   });

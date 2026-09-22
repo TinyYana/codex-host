@@ -3,6 +3,11 @@ import {
   credentialImportChinese,
   type CredentialImportMessages,
 } from "./credential-import-messages.js";
+import {
+  codexAccountChinese,
+  codexAccountEnglish,
+  type CodexAccountMessages,
+} from "./codex-account-messages.js";
 import type { DefaultRendererSettingsPageId } from "./pages.js";
 
 export const RENDERER_SETTINGS_LOCALES = ["en", "zh-CN"] as const;
@@ -24,6 +29,7 @@ export interface RendererSettingsLanguageControl {
 
 export interface RendererSettingsMessages {
   readonly credentialImports: CredentialImportMessages;
+  readonly codexAccounts: CodexAccountMessages;
   readonly locale: RendererSettingsLocale;
   readonly title: string;
   readonly close: string;
@@ -242,6 +248,7 @@ export interface RendererSettingsMessages {
 
 const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
   credentialImports: credentialImportEnglish,
+  codexAccounts: codexAccountEnglish,
   locale: "en",
   title: "Settings",
   close: "Close settings",
@@ -501,6 +508,7 @@ const ENGLISH_MESSAGES: RendererSettingsMessages = Object.freeze({
 
 const CHINESE_MESSAGES: RendererSettingsMessages = Object.freeze({
   credentialImports: credentialImportChinese,
+  codexAccounts: codexAccountChinese,
   locale: "zh-CN",
   title: "设置",
   close: "关闭设置",

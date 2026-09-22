@@ -1,56 +1,123 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  OfficialAdmissionError,
-  OfficialWorkGate,
-} from "../src/codex-runtime/official-work-gate.js";
 
-describe("official work admission", () => {
-  it("admits requests only after initialization", () => {
+import { OfficialWorkGate } from "../src/codex-runtime/official-work-gate.js";
+
+describe("official work publication", () => {
+  it("does not duplicate an initialized publication", () => {
     const gate = new OfficialWorkGate();
-    expect(() => gate.admit()).toThrow("unavailable");
+    const listener = vi.fn();
+    gate.subscribe(listener);
     gate.initialized();
-    const first = gate.admit();
-    const second = gate.admit();
-    expect(gate.busy).toBe(true);
-    expect(() => gate.initialized()).toThrow("busy");
-    first();
-    first();
-    expect(gate.busy).toBe(true);
-    second();
-    expect(gate.busy).toBe(false);
+    gate.initialized();
+    expect(listener).toHaveBeenCalledOnce();
+    expect(gate.revision).toBe(1);
   });
 
-  it("blocks new requests after backend loss while allowing pending requests to settle", () => {
+  it("cannot finish a stopping change before an independent writer releases its lease", () => {
+    const gate = new OfficialWorkGate();
+    gate.initialized();
+    const release = gate.admit();
+    const recovery = gate.beginStoppingChange();
+    expect(gate.busy).toBe(true);
+    expect(() => recovery.assertIdle()).toThrow("busy");
+    expect(() => recovery.finish("ready")).toThrow("busy");
+    release();
+    recovery.assertIdle();
+    recovery.finish("ready");
+    expect(gate.phase).toBe("ready");
+  });
+
+  it("does not interrupt an admitted request to recover", () => {
     const gate = new OfficialWorkGate();
     gate.initialized();
     const release = gate.admit();
     gate.unavailable();
-    expect(() => gate.admit()).toThrow("unavailable");
+    expect(() => gate.beginChange(true)).toThrow("busy");
+    release();
+    gate.beginChange(true).finish("ready");
+  });
+
+  it("keeps the exclusive change lease after native cleanup becomes unavailable", () => {
+    const gate = new OfficialWorkGate();
+    gate.initialized();
+    const change = gate.beginChange();
+    gate.unavailable();
+    expect(() => gate.beginChange(true)).toThrow("changing");
+    expect(() => change.finish("ready")).toThrow("unavailable");
+    expect(gate.phase).toBe("unavailable");
+  });
+});
+
+describe("saved-Account collection admission", () => {
+  it("retains native request leases through collection changes and rejects competing changes", () => {
+    const gate = new OfficialWorkGate();
+    gate.initialized();
+    const release = gate.admit();
+    expect(() => gate.beginChange()).toThrow("busy");
+    expect(() => gate.beginChange(true)).toThrow("busy");
+    const change = gate.beginCollectionChange();
+    expect(() => gate.admit()).toThrow("changing");
+    expect(() => gate.admit("credential-write")).toThrow("changing");
+    expect(() => gate.beginCollectionChange()).toThrow("changing");
+    expect(() => gate.beginStoppingChange()).toThrow("changing");
+    expect(() => change.assertIdle()).toThrow("busy");
+    change.finish("ready");
+    expect(gate.phase).toBe("ready");
+    expect(gate.busy).toBe(true);
     release();
     expect(gate.busy).toBe(false);
+  });
+
+  it("requires all independent Host writers to finish before changing the collection", () => {
+    const gate = new OfficialWorkGate();
     gate.initialized();
+    const first = gate.admit("credential-write");
+    const second = gate.admit("credential-write");
+    expect(() => gate.beginCollectionChange()).toThrow("busy");
+    first();
+    first(); // Releases remain idempotent.
+    expect(() => gate.beginCollectionChange()).toThrow("busy");
+    second();
+    gate.beginCollectionChange().finish("ready");
     expect(gate.phase).toBe("ready");
   });
 
-  it("publishes only phase changes and isolates subscribers", () => {
+  it("does not weaken stop/replacement's requirement to drain every lease", () => {
     const gate = new OfficialWorkGate();
-    gate.subscribe(() => {
-      throw new Error("subscriber failure");
-    });
-    const listener = vi.fn();
-    const unsubscribe = gate.subscribe(listener);
     gate.initialized();
-    gate.initialized();
-    expect(gate.revision).toBe(1);
-    expect(listener).toHaveBeenCalledOnce();
-    unsubscribe();
-    gate.unavailable();
-    expect(gate.revision).toBe(2);
-    expect(listener).toHaveBeenCalledOnce();
+    const native = gate.admit();
+    const writer = gate.admit("credential-write");
+    const change = gate.beginStoppingChange();
+    native();
+    expect(() => change.assertIdle()).toThrow("busy");
+    expect(() => change.finish("ready")).toThrow("busy");
+    writer();
+    change.assertIdle();
+    change.finish("ready");
+    expect(gate.busy).toBe(false);
   });
 
-  it("preserves admission error causes", () => {
-    const cause = new Error("transport failed");
-    expect(new OfficialAdmissionError("unavailable", cause).cause).toBe(cause);
+  it("cannot use a collection change to bypass unavailable state", () => {
+    const gate = new OfficialWorkGate();
+    expect(() => gate.beginCollectionChange()).toThrow("unavailable");
+    gate.initialized();
+    const change = gate.beginCollectionChange();
+    gate.unavailable();
+    expect(() => change.finish("ready")).toThrow("unavailable");
+    change.finish("unavailable");
+    expect(gate.phase).toBe("unavailable");
+  });
+
+  it("lets work arriving mid-change wait for the change to end instead of failing", async () => {
+    const gate = new OfficialWorkGate();
+    gate.initialized();
+    const change = gate.beginStoppingChange();
+    let settled = false;
+    const waiting = gate.settled(30_000).then(() => (settled = true));
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    change.finish("ready");
+    await waiting;
+    expect(() => gate.admit()()).not.toThrow();
   });
 });

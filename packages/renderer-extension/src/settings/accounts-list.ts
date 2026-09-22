@@ -10,6 +10,7 @@ import {
   type AccountUsageDisplay,
   type AccountUsageViewState,
 } from "./accounts-usage.js";
+import type { CodexAccountRowManagement } from "./codex-account-manage.js";
 import type { RendererSettingsMessages } from "./localization.js";
 
 let resetDetailsSequence = 0;
@@ -159,6 +160,40 @@ function createTargetCell(
   return cell;
 }
 
+function appendAccountManagement(
+  document: Document,
+  personCell: HTMLTableCellElement,
+  manage: CodexAccountRowManagement,
+): void {
+  if (manage.flags.length + manage.actions.length === 0 && !manage.rank) return;
+  const wrapper = document.createElement("div");
+  wrapper.className = "settings-account-manage";
+  for (const flag of manage.flags) {
+    const badge = document.createElement("span");
+    badge.className = "settings-account-flag";
+    badge.dataset.tone = flag.tone;
+    badge.textContent = flag.text;
+    if (flag.title) badge.title = flag.title;
+    wrapper.append(badge);
+  }
+  if (manage.rank) {
+    // Host ranking reasons are explanatory: shown on hover, never as a quota value.
+    const rank = document.createElement("span");
+    rank.className = "settings-account-rank";
+    if (manage.rank.recommended) rank.dataset.recommended = "true";
+    rank.textContent = manage.rank.text;
+    if (manage.rank.title) rank.title = manage.rank.title;
+    wrapper.append(rank);
+  }
+  if (manage.actions.length > 0) {
+    const actions = document.createElement("div");
+    actions.className = "settings-account-manage__actions";
+    actions.append(...manage.actions);
+    wrapper.append(actions);
+  }
+  personCell.append(wrapper);
+}
+
 export function renderAccountRows(
   document: Document,
   account: CodexAccountSummary,
@@ -170,6 +205,8 @@ export function renderAccountRows(
     resetExpanded: boolean;
     onRetry: () => void;
     importAction?: HTMLElement | null;
+    /** Managed-Account additions; null or absent keeps the read-only row unchanged. */
+    manage?: CodexAccountRowManagement | null;
     onResetExpanded: (open: boolean) => void;
   },
 ): HTMLTableRowElement[] {
@@ -208,6 +245,7 @@ export function renderAccountRows(
     account.planType === "pro" ? "weekly-only" : "all",
   );
   if (usage.additional) personCell.append(usage.additional);
+  if (input.manage) appendAccountManagement(document, personCell, input.manage);
   const actionsCell = createTargetCell(document, input.importAction);
   if (input.importAction) row.className += " settings-account-row--targets";
   const continuationRows = usage.continuationCells.map((cells) => {

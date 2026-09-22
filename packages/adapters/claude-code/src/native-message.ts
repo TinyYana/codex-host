@@ -2,6 +2,7 @@ import { jsonValueSchema } from "@codexhost/shared-contracts";
 
 import { parseClaudeNativeFileChange } from "./file-change.js";
 import type {
+  ClaudeGoalSignal,
   ClaudePlanLimitEvent,
   ClaudeTransportFailureKind,
   ClaudeTransportTurnResult,
@@ -251,6 +252,34 @@ function parsePlanLimitWindow(
   const resetsAt = value.resetsAt;
   const resetsAtUnix = safeNonNegativeInteger(resetsAt) ? resetsAt : undefined;
   return { utilizationPercent, ...(resetsAtUnix !== undefined ? { resetsAtUnix } : {}) };
+}
+
+const goalCommandOutputPattern =
+  /^(?:Goal set: |Goal cleared: |No goal set|Goal active: |Goal condition is limited to |\/goal )/u;
+const goalErrorNoticePrefix = "Goal cleared after an unrecoverable error";
+
+/**
+ * Recognises the native Goal evidence Claude exposes to SDK hosts: `/goal`
+ * local command output (a synthetic Assistant message) and the
+ * unrecoverable-error notice. Terminal verdicts come from the transcript.
+ */
+export function parseClaudeGoalSignal(message: unknown): ClaudeGoalSignal | null {
+  if (!isRecord(message) || parentToolUseId(message) !== null) return null;
+  if (message.type === "assistant" && isRecord(message.message)) {
+    if (message.message.model !== "<synthetic>") return null;
+    const text = assistantText(message);
+    if (text === null || !goalCommandOutputPattern.test(text)) return null;
+    return { type: "command", output: text };
+  }
+  if (
+    message.type === "system" &&
+    message.subtype === "informational" &&
+    typeof message.content === "string" &&
+    message.content.startsWith(goalErrorNoticePrefix)
+  ) {
+    return { type: "clearedByError", reason: message.content };
+  }
+  return null;
 }
 
 /**

@@ -98,6 +98,7 @@ function fixture(
     return fakeQuery as unknown as Query;
   });
   const onFault = vi.fn();
+  const onGoalSignal = vi.fn();
   const onPermissionModeChanged = vi.fn();
   const onPlanLimit = vi.fn();
   const transport = new ClaudeSdkTransport({
@@ -111,12 +112,14 @@ function fixture(
     closeTimeoutMs: 100,
     onPermissionModeChanged,
     onFault,
+    onGoalSignal,
     onPlanLimit,
     queryFactory,
   });
   return {
     fakeQuery,
     onFault,
+    onGoalSignal,
     onPermissionModeChanged,
     onPlanLimit,
     queryFactory,
@@ -127,6 +130,36 @@ function fixture(
     transport,
   };
 }
+
+describe("ClaudeSdkTransport Goal control", () => {
+  it("does not project a Goal acknowledgement as Assistant output", async () => {
+    const value = fixture();
+    await value.transport.start();
+    const events: ClaudeTurnEvent[] = [];
+    const turn = value.transport.runTurn(
+      "/goal ship it",
+      "00000000-0000-4000-8000-000000000024",
+      (event) => events.push(event),
+    );
+    value.fakeQuery.push({
+      type: "assistant",
+      uuid: "00000000-0000-4000-8000-000000000025",
+      session_id: "00000000-0000-4000-8000-000000000001",
+      parent_tool_use_id: null,
+      message: {
+        role: "assistant",
+        model: "<synthetic>",
+        content: [{ type: "text", text: "Goal set: ship it" }],
+      },
+    } as unknown as SDKMessage);
+    await vi.waitFor(() => expect(value.onGoalSignal).toHaveBeenCalledOnce());
+    expect(events).toEqual([]);
+    completeTurn(value.fakeQuery);
+    await turn;
+    expect(events).toEqual([]);
+    await value.transport.close();
+  });
+});
 
 function completeTurn(fakeQuery: FakeQuery): void {
   fakeQuery.push({

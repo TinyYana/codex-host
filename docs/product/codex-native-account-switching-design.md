@@ -1,7 +1,12 @@
-# Codex 账号展示
+# Codex 帳號切換的設計邊界
 
-CodexHost 不再提供全局 Codex 多账号切换。Account 仍是认证身份，不等于 Harness、Model、Provider 或 Billing Source；不建立 Model 代理、每账号后台或 per-Thread 账号路由。
+CodexHost 以「單一正式 `CODEX_HOME`、單一自有官方 backend、多份保存的 credential」提供全域 Codex 帳號切換。Account 是認證身分，不等於 Harness、Model、Provider 或 Billing Source；不建立 Model proxy、per-帳號 backend pool 或 per-Thread 帳號路由。
 
-设置 → 账号显示当前官方 Codex 身份、官方 `account/rateLimits/read` 额度，以及其他 Harness 的只读 `inspectAccount()` 行。另提供显式确认后将兼容授权一次性导入 Pi 的独立入口；这不切换官方 Codex 登录、不建立 Host 凭据收藏库。官方 Desktop 登录/退出仍由官方后端处理。Host 不读取或改写 `.codexhost-native-accounts`。
+歷史脈絡：PR #117 做過 per-帳號 `CODEX_HOME` + runtime pool，被 PR #262 的原生全域切換取代；`f3592bdb` 曾把 Host 多帳號整個移除，只留唯讀額度頁（`openspec/changes/remove-codex-multi-account/`）。現行契約 `openspec/changes/add-codex-managed-accounts/` 取代了那次移除，範圍比 #262 窄：
 
-产品契约见 `openspec/changes/remove-codex-multi-account/`。用户可见行为见 [账号与额度设置](codex-accounts.md)。
+- 不自己做登入。新增帳號＝官方 Desktop 登入後明確「保存目前帳號」；官方 `account/login/*`、`account/logout` 原樣轉發。
+- 不為了切換終止任何非自有的 Codex 行程；偵測到共用同一個 home 的外部行程時，以 `unsafe-external-process` 明確拒絕。
+- 沒有 vault 之前管理功能休眠，行為等同唯讀部署。
+- 目前帳號永遠由 `auth.json` 推導，不持久化 selector；UI 只在官方 `account/read` 驗證新身分之後才更新。
+
+行為、交易步驟、額度、Ranker、Auto 與 migration 見 [Codex 多帳號、額度 Ranking 與安全切換](codex-managed-accounts.md)；設定頁版面見 [帳號與額度設定](codex-accounts.md)。

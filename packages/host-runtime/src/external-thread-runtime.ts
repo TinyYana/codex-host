@@ -35,6 +35,7 @@ import {
   type ExternalThreadRepository,
 } from "./external-thread-repository.js";
 import { DELEGATION_THREAD_ID_ENV } from "./delegation-types.js";
+import type { ExternalThreadGoal } from "./external-thread-goal.js";
 import { SessionStateObserver } from "./session-state-observer.js";
 import { DesktopRequestQueue } from "./desktop-request-queue.js";
 import { ExternalThreadIdleRelease } from "./external-thread-idle-release.js";
@@ -69,6 +70,9 @@ export interface ExternalThread {
   ephemeralTurnIds: Set<HostTurnId>;
   persistenceError: Error | null;
   ignoredInteractionIds: Set<HostInteractionId>;
+  /** Harness-owned Goal as last observed; `goalLoaded` says native evidence was consulted. */
+  goal: ExternalThreadGoal | null;
+  goalLoaded: boolean;
 }
 
 export type ExternalThreadLocation =
@@ -308,6 +312,8 @@ export class ExternalThreadRuntime {
       ephemeralTurnIds: new Set(),
       persistenceError: null,
       ignoredInteractionIds: new Set(),
+      goal: null,
+      goalLoaded: false,
     };
     this.idleRelease.touch(externalThread);
     externalThread.outputTask = this.#consumeOutputs(externalThread);

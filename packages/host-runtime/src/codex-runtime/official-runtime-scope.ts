@@ -103,8 +103,8 @@ export class OfficialRuntimeClient {
   }
   async initializeProtocol(params: JsonObject): Promise<JsonObject> {
     if (this.#closed || this.#scope.closed) throw new OfficialAdmissionError("unavailable");
-    // Desktop initializes the Host transport, not backend readiness. Retain its
-    // native negotiation while backend admission is unavailable.
+    // Desktop initializes the Host transport, not Account readiness. Retain its
+    // native negotiation for recovery while Account admission is unavailable.
     this.#session.configure(params);
     if (this.#scope.gate.phase === "ready") {
       try {

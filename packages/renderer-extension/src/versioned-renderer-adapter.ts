@@ -147,6 +147,7 @@ interface RendererDraftPrewarmPolicyTarget {
 
 const DRAFT_PREWARM_POLICY_WAIT_TIMEOUT_MS = 10_000;
 const DRAFT_PREWARM_POLICY_POLL_INTERVAL_MS = 25;
+const CODEX_ACCOUNT_MANAGEMENT_UNAVAILABLE = "Codex Account management is unavailable";
 
 declare global {
   interface Window {
@@ -1020,6 +1021,49 @@ export function installCurrentRendererAdapter(): {
       const client = currentModelClient();
       if (!client.subscribeCodexAccounts) throw new Error("Codex Account updates are unavailable");
       return client.subscribeCodexAccounts(listener);
+    },
+    saveCurrentCodexAccount: () => {
+      const client = currentModelClient();
+      if (!client.saveCurrentCodexAccount) throw new Error(CODEX_ACCOUNT_MANAGEMENT_UNAVAILABLE);
+      return client.saveCurrentCodexAccount();
+    },
+    switchCodexAccount: (
+      input: Parameters<NonNullable<RendererModelClient["switchCodexAccount"]>>[0],
+    ) => {
+      const client = currentModelClient();
+      if (!client.switchCodexAccount) throw new Error(CODEX_ACCOUNT_MANAGEMENT_UNAVAILABLE);
+      return client.switchCodexAccount(input);
+    },
+    deleteCodexAccount: (
+      input: Parameters<NonNullable<RendererModelClient["deleteCodexAccount"]>>[0],
+    ) => {
+      const client = currentModelClient();
+      if (!client.deleteCodexAccount) throw new Error(CODEX_ACCOUNT_MANAGEMENT_UNAVAILABLE);
+      return client.deleteCodexAccount(input);
+    },
+    recoverCodexAccounts: () => {
+      const client = currentModelClient();
+      if (!client.recoverCodexAccounts) throw new Error(CODEX_ACCOUNT_MANAGEMENT_UNAVAILABLE);
+      return client.recoverCodexAccounts();
+    },
+    updateCodexAccountAuto: (
+      input: Parameters<NonNullable<RendererModelClient["updateCodexAccountAuto"]>>[0],
+    ) => {
+      const client = currentModelClient();
+      if (!client.updateCodexAccountAuto) throw new Error(CODEX_ACCOUNT_MANAGEMENT_UNAVAILABLE);
+      return client.updateCodexAccountAuto(input);
+    },
+    inspectCodexAccountRanking: (
+      input?: Parameters<NonNullable<RendererModelClient["inspectCodexAccountRanking"]>>[0],
+    ) => {
+      const client = currentModelClient();
+      if (!client.inspectCodexAccountRanking) throw new Error(CODEX_ACCOUNT_MANAGEMENT_UNAVAILABLE);
+      return client.inspectCodexAccountRanking(input);
+    },
+    startCodexLogin: () => {
+      const client = currentModelClient();
+      if (!client.startCodexLogin) throw new Error(CODEX_ACCOUNT_MANAGEMENT_UNAVAILABLE);
+      return client.startCodexLogin();
     },
   });
   const forkControl = installRendererForkControl({

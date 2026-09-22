@@ -350,6 +350,53 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+.settings-account-delete {
+  color: var(--settings-danger);
+}
+.settings-account-status[data-tone="error"] {
+  color: var(--settings-danger);
+}
+.settings-account-status > .settings-command-button {
+  margin-left: 6px;
+  vertical-align: middle;
+}
+.settings-account-manage {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--settings-muted);
+}
+.settings-account-manage__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: -5px;
+}
+.settings-account-manage__actions .settings-account-action {
+  min-height: 24px;
+  padding: 2px 5px;
+}
+.settings-account-flag {
+  padding: 1px 6px;
+  font-size: 10px;
+  white-space: nowrap;
+  border: 1px solid var(--settings-border);
+  border-radius: 999px;
+}
+.settings-account-flag[data-tone="warning"] {
+  color: var(--settings-warning);
+  border-color: currentColor;
+}
+.settings-account-rank {
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+.settings-account-rank[data-recommended="true"] {
+  color: var(--settings-text);
+}
 .settings-account-reset-summary {
   display: inline-flex;
   align-items: center;

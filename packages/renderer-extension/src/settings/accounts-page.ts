@@ -18,6 +18,10 @@ import {
   renderAccountRows,
   renderHarnessAccountRows,
 } from "./accounts-list.js";
+import {
+  mountCodexAccountManagement,
+  type RendererCodexAccountManageClient,
+} from "./codex-account-manage.js";
 import { createHarnessAccounts, type RendererHarnessAccountClient } from "./harness-accounts.js";
 import { mountAccountResetCountdowns } from "./accounts-reset-time.js";
 import type { AccountUsageDisplay, AccountUsageViewState } from "./accounts-usage.js";
@@ -27,7 +31,10 @@ import type { RendererSettingsMessages } from "./localization.js";
 import { shouldApplyCodexAccountSnapshot } from "../renderer-codex-account-state.js";
 
 export interface RendererCodexAccountClient
-  extends RendererHarnessAccountClient, RendererCredentialImportClient {
+  extends
+    RendererHarnessAccountClient,
+    RendererCredentialImportClient,
+    RendererCodexAccountManageClient {
   listCodexAccounts(): Promise<CodexAccountListResult>;
   refreshCodexAccounts?(): Promise<CodexAccountListResult>;
   inspectCodexAccountUsage?(input: CodexAccountUsageParams): Promise<CodexAccountUsageResult>;
@@ -102,6 +109,7 @@ export function createAccountsSettingsPage(
       refreshUsage.addEventListener("click", () => {
         usageByAccountId.clear();
         loadUsage(accounts);
+        manage.refreshRanking(true);
         void harnessAccounts?.refresh(true);
         void credentialImports.refresh();
       });
@@ -118,15 +126,49 @@ export function createAccountsSettingsPage(
         messages.credentialImports,
         () => render(),
       );
-      context.content.append(header, status, toolbar, list, credentialImports.section);
-      const stopCountdowns = mountAccountResetCountdowns(list, messages, context.signal);
-
       let accounts: readonly CodexAccountSummary[] = [];
       let currentAccountId: string | null = null;
       let accountPhase: CodexAccountListResult["phase"] = "unavailable";
       let accountRevision = 0;
       let accountInstanceId: string | undefined;
       let hasAccountSnapshot = false;
+      // Absent capabilities mean a read-only deployment: the page then renders exactly as before.
+      let capabilities: CodexAccountListResult["capabilities"];
+      let pendingOperation: CodexAccountListResult["pendingOperation"];
+      let autoMode: CodexAccountListResult["auto"];
+      const manage = mountCodexAccountManagement({
+        document,
+        dialogRoot: context.content,
+        messages,
+        signal: context.signal,
+        getClient,
+        snapshot: () => ({
+          accounts: [...accounts],
+          currentAccountId,
+          phase: accountPhase,
+          capabilities,
+          pendingOperation,
+          auto: autoMode,
+        }),
+        applyResult(result, kind) {
+          // A verified switch changes which quota source each Account uses; re-read them all.
+          if (kind === "switch") usageByAccountId.clear();
+          if (!setAccounts(result)) loadUsage(accounts);
+        },
+        render: () => render(),
+      });
+      copy.append(manage.guide);
+      header.append(manage.saveCurrent);
+      context.content.append(
+        header,
+        status,
+        manage.status,
+        toolbar,
+        list,
+        manage.autoGroup,
+        credentialImports.section,
+      );
+      const stopCountdowns = mountAccountResetCountdowns(list, messages, context.signal);
       let loadMessage: string | null = null;
       const usageByAccountId = new Map<string, AccountUsageViewState>();
       let usageDisplay: AccountUsageDisplay = "remaining";
@@ -137,6 +179,7 @@ export function createAccountsSettingsPage(
         body.replaceChildren();
         status.replaceChildren();
         if (loadMessage) status.append(loadMessage);
+        manage.update();
         connectedCount.textContent = String(accounts.length + harnessAccounts.accounts.length);
         updateDisplay(usageDisplay);
         for (const [display, button] of displayButtons) {
@@ -146,6 +189,7 @@ export function createAccountsSettingsPage(
           ((!getClient()?.inspectCodexAccountUsage || accounts.length === 0) &&
             !getClient()?.listHarnessAccounts) ||
           harnessAccounts?.refreshing === true ||
+          manage.busy() ||
           [...usageByAccountId.values()].some((usage) => usage.status === "loading");
         const query = search.value.trim().toLocaleLowerCase();
         const visibleAccounts = accounts.filter((account) =>
@@ -177,6 +221,7 @@ export function createAccountsSettingsPage(
               ),
               usage: usageByAccountId.get(account.accountId),
               display: usageDisplay,
+              manage: manage.row(account),
               resetExpanded: expandedResetAccounts.has(account.accountId),
               onRetry: () => {
                 usageByAccountId.delete(account.accountId);
@@ -218,7 +263,10 @@ export function createAccountsSettingsPage(
         for (const accountId of [...usageByAccountId.keys()]) {
           if (!keep.has(accountId)) usageByAccountId.delete(accountId);
         }
-        const pending = saved.filter((account) => !usageByAccountId.has(account.accountId));
+        // A saved credential that needs a native re-login has no readable quota: it stays "—".
+        const pending = saved.filter(
+          (account) => !account.requiresLogin && !usageByAccountId.has(account.accountId),
+        );
         if (!inspect || pending.length === 0) {
           render();
           return;
@@ -255,7 +303,7 @@ export function createAccountsSettingsPage(
           }),
         );
       };
-      const setAccounts = (result: CodexAccountListResult): void => {
+      const setAccounts = (result: CodexAccountListResult): boolean => {
         if (
           !shouldApplyCodexAccountSnapshot(
             hasAccountSnapshot
@@ -264,7 +312,7 @@ export function createAccountsSettingsPage(
             result,
           )
         ) {
-          return;
+          return false;
         }
         hasAccountSnapshot = true;
         accounts = result.accounts;
@@ -272,11 +320,16 @@ export function createAccountsSettingsPage(
         accountPhase = result.phase;
         accountRevision = result.revision;
         accountInstanceId = result.instanceId;
+        capabilities = result.capabilities;
+        pendingOperation = result.pendingOperation;
+        autoMode = result.auto;
         for (const accountId of expandedResetAccounts) {
           if (!accounts.some((account) => account.accountId === accountId))
             expandedResetAccounts.delete(accountId);
         }
         loadUsage(accounts);
+        manage.refreshRanking();
+        return true;
       };
       const refreshInBackground = (): void => {
         if (!client().refreshCodexAccounts) return;
