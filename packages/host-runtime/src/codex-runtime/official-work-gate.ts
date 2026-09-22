@@ -44,6 +44,21 @@ export class OfficialWorkGate {
     if (this.#change || this.busy) throw new OfficialAdmissionError("busy");
     this.#publish("ready");
   }
+  /** Resolves once a Host change ends (or after `timeoutMs`); admission still decides the outcome. */
+  settled(timeoutMs: number): Promise<void> {
+    if (this.#phase !== "changing") return Promise.resolve();
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        unsubscribe();
+        resolve();
+      };
+      const timer = setTimeout(done, timeoutMs);
+      const unsubscribe = this.subscribe(() => {
+        if (this.#phase !== "changing") done();
+      });
+    });
+  }
   admit(kind: "request" | "credential-write" | "native-auth" = "request"): () => void {
     if (this.#phase !== "ready") throw new OfficialAdmissionError(this.#phase);
     const request = Symbol();

@@ -229,7 +229,8 @@ describe("single official runtime owner", () => {
           expect(connection.requests.some((r) => r.method === method)).toBe(true),
         );
         const lease = f.gate.beginStoppingChange();
-        await expect(client.request(method, {})).rejects.toMatchObject({ code: "changing" });
+        // Work arriving mid-change waits for it instead of failing Desktop startup checks.
+        const waitedBeforeStop = client.request(method, {});
         await f.owner.stop();
         if (via === "request") expect(await pending).toBeInstanceOf(Error);
         else {
@@ -241,13 +242,17 @@ describe("single official runtime owner", () => {
         expect(f.gate.phase).toBe("changing");
         lease.assertIdle();
         expect(f.create).toHaveBeenCalledOnce();
-        await expect(client.request(method, {})).rejects.toMatchObject({ code: "changing" });
+        const waitedAfterStop = client.request(method, {});
+        await Promise.resolve();
+        // Waiting work neither creates a backend nor blocks the change from finishing.
+        lease.assertIdle();
         expect(f.create).toHaveBeenCalledOnce();
         await f.owner.start();
         lease.finish("ready");
+        await Promise.all([waitedBeforeStop, waitedAfterStop]);
         await client.request("account/rateLimits/read", {});
         expect(f.connection(1).requests.filter((r) => r.method === method)).toHaveLength(
-          method === "account/rateLimits/read" ? 1 : 0,
+          method === "account/rateLimits/read" ? 3 : 2,
         );
       } finally {
         await f.owner.stop();

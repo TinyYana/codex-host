@@ -71,6 +71,9 @@ const RESUME_FIELDS = new Set([
 ]);
 
 /** One process owner, many native client connections; never a per-Account pool. */
+/** Desktop treats some failed startup requests as fatal, so work arriving mid-switch waits. */
+const CHANGE_WAIT_MS = 30_000;
+
 export class OfficialRuntimeOwner {
   readonly gate: OfficialWorkGate;
   readonly #factory: () => OwnedOfficialBackend;
@@ -342,6 +345,7 @@ export class OfficialRuntimeOwner {
 
   async #request(client: Client, method: string, params: JsonObject): Promise<JsonObject> {
     this.#checkMethod(method);
+    await this.gate.settled(CHANGE_WAIT_MS);
     const finish = this.#nativeAuth.admit(method, params);
     let response: JsonObject | undefined;
     try {
@@ -380,6 +384,7 @@ export class OfficialRuntimeOwner {
       throw new Error("Official methods require a request ID");
     const params = object(value.params) ? value.params : {};
     this.#checkMethod(value.method);
+    await this.gate.settled(CHANGE_WAIT_MS);
     const finish = this.#nativeAuth.admit(value.method, params);
     let pendingKey: string | undefined;
     try {

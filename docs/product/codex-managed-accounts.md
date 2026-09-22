@@ -30,7 +30,7 @@ Account 仍然只是認證身分，不等於 Harness、Model、Provider 或 Bill
 `NativeCodexAccounts.switch()`（`packages/host-runtime/src/account/native-codex-accounts.ts`）：
 
 1. 檢查儲存型態（檔案型、無 API Key 覆寫）。
-2. 取得 change lease：`OfficialWorkGate` 進入 `changing`，之後任何新請求立即以 busy 失敗。若有進行中的原生登入/登出，切換被拒絕。
+2. 取得 change lease：`OfficialWorkGate` 進入 `changing`，之後新進來的官方請求不會被 admit，而是等切換結束再轉發到新的 backend（最多 30 秒，逾時才以 `changing` 失敗）；Desktop 會把啟動檢查請求失敗視為致命錯誤而退出，所以不能立即拒絕。若有進行中的原生登入/登出，切換被拒絕。
 3. **Turn 檢查**：gate 只知道 in-flight 請求，不知道 Turn。所以 lease 拿到之後，同步詢問 Turn 的擁有者（`AppServerHost` 透過 `bindIdleProbe` 提供 `#hasActiveWork()`）；有任何官方或外部 Turn 在跑就回 busy，backend 不會被停。
 4. 保存目前最新的 credential。
 5. **外部行程檢查**：偵測是否有其他 Codex 行程（例如終端機裡的 `codex` CLI）使用同一個 `CODEX_HOME`。有的話回 `unsafe-external-process`，**不終止任何行程**，此時什麼都還沒停、什麼都還沒寫。偵測是 best-effort（`ps`；讀得到環境變數時以 `CODEX_HOME` 判斷是否同一個 home；Windows 目前不偵測），偵測不到就放行，由第 9 步兜底。

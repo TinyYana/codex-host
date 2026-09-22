@@ -107,4 +107,17 @@ describe("saved-Account collection admission", () => {
     change.finish("unavailable");
     expect(gate.phase).toBe("unavailable");
   });
+
+  it("lets work arriving mid-change wait for the change to end instead of failing", async () => {
+    const gate = new OfficialWorkGate();
+    gate.initialized();
+    const change = gate.beginStoppingChange();
+    let settled = false;
+    const waiting = gate.settled(30_000).then(() => (settled = true));
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    change.finish("ready");
+    await waiting;
+    expect(() => gate.admit()()).not.toThrow();
+  });
 });
