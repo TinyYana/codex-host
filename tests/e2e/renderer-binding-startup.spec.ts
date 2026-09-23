@@ -104,7 +104,12 @@ const { outputFiles } = await build({
           return true;
         },
         {
-          inspectHarness: async () => inspection,
+          inspectHarness: async (_input, options) => {
+            if (globalThis.holdBackgroundInspections && options?.priority === "background") {
+              await new Promise(() => {});
+            }
+            return inspection;
+          },
           inspectHarnessCommands: async (input) => {
             globalThis.commandCatalogRequests.push(input);
             if (kiro) return KIRO_COMMAND_CATALOG;
@@ -237,6 +242,20 @@ test("a draft waits for the Desktop prewarm policy before applying its Model", a
   await expect(trigger).toContainText("Startup Model");
   await expect(trigger).toBeEnabled();
   await expect(trigger).toHaveAttribute("title", "Startup Model");
+});
+
+test("the selected Model loads while its background Harness discovery remains queued", async ({
+  page,
+}, testInfo) => {
+  await page.evaluate(() => Reflect.set(globalThis, "holdBackgroundInspections", true));
+  await page.addScriptTag({ content: browserBundle });
+
+  const trigger = page.locator('[data-codexhost-model-control] > button[aria-haspopup="menu"]');
+  await expect(trigger).toContainText("Startup Model");
+  await expect(trigger).toBeEnabled();
+  await trigger.click();
+  await expect(page.getByRole("menu", { name: "Model", exact: true })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("foreground-model-ready.png") });
 });
 
 test("restores the visible draft selection after a same-Host connection policy changes", async ({

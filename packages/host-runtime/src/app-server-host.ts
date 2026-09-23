@@ -248,6 +248,8 @@ export interface AppServerHostOptions {
   /** Defaults to true. A listener that shares one store across sessions owns closing it. */
   closeMappingStoreOnExit?: boolean;
   spawnOfficial?: typeof spawn;
+  /** Grace period for each official app-server stop step. Tests shorten it. */
+  officialCloseTimeoutMs?: number;
   createOfficialConnection?: () =>
     OfficialAppServerConnection | Promise<OfficialAppServerConnection>;
   accountControl?: CodexAccountControl;
@@ -581,6 +583,9 @@ export class AppServerHost {
                   ...(this.#options.spawnOfficial
                     ? { spawnOfficial: this.#options.spawnOfficial }
                     : {}),
+                  ...(this.#options.officialCloseTimeoutMs === undefined
+                    ? {}
+                    : { closeTimeoutMs: this.#options.officialCloseTimeoutMs }),
                 }),
           ),
       });

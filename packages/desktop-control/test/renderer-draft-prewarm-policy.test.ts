@@ -325,6 +325,45 @@ describe("Renderer draft prewarm policy", () => {
     });
   });
 
+  it("rejects an in-flight prewarm after the selected Harness changes", async () => {
+    const stalePrewarm = Promise.withResolvers<unknown>();
+    const prewarmThreadStart = vi
+      .fn<(parameters: unknown) => Promise<unknown>>()
+      .mockImplementationOnce(() => stalePrewarm.promise)
+      .mockImplementationOnce(async (parameters) => parameters);
+    const manager = requestManagerFixture();
+    const bridge = requestBridgeFixture({ prewarmThreadStart });
+    const discardAllPrewarmedThreads = vi.fn();
+    const target: DraftPrewarmPolicyTarget = {};
+    installDraftPrewarmPolicyBridge(manager, bridge, "local", target, {
+      discardAllPrewarmedThreads,
+    });
+    const policy = target.__codexhostDraftPrewarmPolicyV1 as {
+      select(model: string | null): boolean;
+      clear(): Promise<void>;
+    };
+
+    policy.select("codexhost/pi-native");
+    const pendingPi = bridge.prewarmThreadStart({ model: "native-model" }) as Promise<unknown>;
+    policy.select("codexhost/claude-code-native");
+    await policy.clear();
+    stalePrewarm.resolve({ thread: { id: "stale-pi" } });
+
+    await expect(pendingPi).rejects.toThrow(
+      "Renderer draft prewarm was invalidated by a configuration change",
+    );
+    await expect(bridge.prewarmThreadStart({ model: "native-model" })).resolves.toEqual({
+      model: "codexhost/claude-code-native",
+    });
+    expect(prewarmThreadStart).toHaveBeenNthCalledWith(1, {
+      model: "codexhost/pi-native",
+    });
+    expect(prewarmThreadStart).toHaveBeenNthCalledWith(2, {
+      model: "codexhost/claude-code-native",
+    });
+    expect(discardAllPrewarmedThreads).toHaveBeenCalledOnce();
+  });
+
   it("tunnels private Host requests through the stock Remote Control app-server", async () => {
     const manager = requestManagerFixture();
     const originalNotification = manager.onNotification as ReturnType<typeof vi.fn>;

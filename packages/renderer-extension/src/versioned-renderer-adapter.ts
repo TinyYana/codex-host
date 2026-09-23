@@ -13,7 +13,6 @@ import {
   harnessThinkingOptionIdSchema,
   hostThreadIdSchema,
   type ExternalThreadForkParams,
-  type HarnessInspectParams,
   type HarnessModelRef,
   type HarnessPermissionModeId,
   type HarnessThinkingOptionId,
@@ -949,7 +948,8 @@ export function installCurrentRendererAdapter(): {
       return client.listHarnessPlugins();
     },
     forkThread: (input: ExternalThreadForkParams) => currentModelClient().forkThread(input),
-    inspectHarness: (input: HarnessInspectParams) => currentModelClient().inspectHarness(input),
+    inspectHarness: (...args: Parameters<RendererModelClient["inspectHarness"]>) =>
+      currentModelClient().inspectHarness(...args),
     inspectThread: (input: ThreadInspectionParams) => currentModelClient().inspectThread(input),
     inspectHarnessCommands: (input: HarnessCommandsInspectParams) =>
       currentModelClient().inspectHarnessCommands(input),
