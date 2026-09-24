@@ -403,6 +403,12 @@ function renderConnectionInspector(
   inspector.replaceChildren(createInspectorHeader(document, item, messages));
   const body = document.createElement("div");
   body.className = "settings-connection-inspector__body";
+  if (item.agentSnapshot?.agent === "deepseek-harness") {
+    const compatibility = document.createElement("p");
+    compatibility.className = "settings-connection-compatibility";
+    compatibility.textContent = messages.connectionDeepSeekTestedVersions;
+    body.append(compatibility);
+  }
 
   if (item.agentSnapshot?.availability === "notInstalled") {
     const callout = document.createElement("div");

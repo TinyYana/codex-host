@@ -99,6 +99,14 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
   </tr>
   <tr>
     <td colspan="2" valign="top">
+      <p><strong>#으로 위임할 Agent 선택</strong></p>
+      <div align="center">
+        <img width="90%" src="../imgs/composer-hash-delegation-menu.png" alt="채팅 입력창에 #을 입력하면 작업을 위임할 Agent 목록이 표시됩니다">
+      </div>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" valign="top">
       <p><strong>남은 사용량 표시</strong></p>
       <img src="../imgs/grok-usage-limits.png" alt="5시간 및 7일 기간의 남은 한도와 초기화 시간">
     </td>
@@ -139,6 +147,8 @@ xattr -dr com.apple.quarantine /Applications/codexhost.app
 </details>
 
 ## Agent 간 협업
+
+채팅 입력창에 `#`을 입력하면 작업을 위임할 Agent를 선택하거나 현재 선택한 Harness에서 사용할 수 있는 명령과 스킬을 찾을 수 있습니다.
 
 현재 Agent에게 독립 작업을 다른 Harness로 넘기도록 요청할 수 있습니다. 예를 들면 다음과 같습니다.
 
@@ -224,7 +234,7 @@ CodexHost는 다른 방식을 택합니다.
       <sub><strong>함께 기여해 주세요.</strong></sub>
     </td>
     <td align="center">
-      <img width="230" alt="위챗 그룹 QR 코드" src="https://github.com/user-attachments/assets/e40b162e-a961-43ac-9728-af59890c4d72" />
+      <img width="230" alt="위챗 그룹 QR 코드" src="../imgs/wechat-qrcode.jpg" />
     </td>
   </tr>
 </table>
