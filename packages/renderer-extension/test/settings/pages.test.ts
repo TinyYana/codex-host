@@ -14,7 +14,7 @@ import {
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../../src/settings/icons.js", () => ({
-  createRendererSettingsIcon: () => "icon",
+  createRendererSettingsIcon: () => ({ classList: { add() {} } }),
   isRendererSettingsIconName: () => true,
 }));
 
@@ -774,7 +774,9 @@ describe("Renderer Connections page", () => {
     const panel = elementWithClass(content, "settings-harness-installation");
     expect(visibleText(panel)).toContain(expected);
     expect(
-      visibleText(content).includes("已在 DSH 0.1.2-rc.1、0.1.5-rc.1 和 0.1.5-rc.2 上测试。"),
+      visibleText(content).includes(
+        "支持 DSH 版本：0.1.2-rc.1、0.1.5-rc.1、0.1.5-rc.2、0.1.5-rc.3、0.1.7-rc.1 和 0.1.7-rc.2。",
+      ),
     ).toBe(agent === "deepseek-harness");
     expect(visibleText(panel)).toContain("请在远程 Host 上安装。");
     expect(visibleText(panel)).not.toMatch(
@@ -969,7 +971,10 @@ describe("Renderer Connections page", () => {
     );
     if (!dshRow) throw new Error("DeepSeek Harness row is not rendered");
     dshRow.dispatch("click", { target: null });
-    expect(visibleText(content)).toContain("其他版本可以尝试连接，但尚未验证。");
+    expect(visibleText(content)).toContain("0.1.7-rc.2");
+    expect(visibleText(content)).toContain(
+      "其他版本可以在通过原生协议检查后尝试连接，但尚未列入支持列表。",
+    );
     const open = descendants(content).find(
       ({ dataset }) => dataset.connectionAction === "open-web-ui",
     );
@@ -1932,9 +1937,18 @@ describe("Renderer Updates page", () => {
     // Status and the update action come first; the manual fallback stays visible
     // right below it, and release notes render last.
     expect(content.children.indexOf(panel)).toBeLessThan(content.children.indexOf(controls));
-    expect(content.children.indexOf(controls)).toBeLessThan(
+    const starBanner = elementWithClass(content, "settings-update-star");
+    expect(content.children.indexOf(controls)).toBeLessThan(content.children.indexOf(starBanner));
+    expect(content.children.indexOf(starBanner)).toBeLessThan(
       content.children.indexOf(elementWithClass(content, "settings-update-notes-section")),
     );
+    expect(visibleText(starBanner)).toContain("如果 CodexHost 帮到了你，请在 GitHub 点个 Star");
+    const starLink = descendants(starBanner).find(({ tagName }) => tagName === "a");
+    expect(starLink).toMatchObject({
+      href: "https://github.com/BytePioneer-AI/codex-host",
+      target: "_blank",
+      rel: "noopener noreferrer",
+    });
     expect(descendants(panel)).toContain(updateButton);
     expect(descendants(panel)).not.toContain(notes);
     expect(notes.children.map((child) => (child as FakeElement).tagName)).toEqual(["h2", "ul"]);
