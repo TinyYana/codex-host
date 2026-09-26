@@ -127,10 +127,13 @@ jobs:
 
       - name: Resolve release
         id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           version="$(jq -r .version package.json)"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
-          if git ls-remote --exit-code --tags origin "refs/tags/v${version}" > /dev/null; then
+          if gh release view "v${version}" > /dev/null 2>&1; then
             echo "needed=false" >> "$GITHUB_OUTPUT"
           else
             echo "needed=true" >> "$GITHUB_OUTPUT"
@@ -180,19 +183,24 @@ jobs:
         if: steps.release.outputs.needed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          # gh would otherwise resolve the upstream remote as the target repository.
+          GH_REPO: ${{ github.repository }}
           VERSION: ${{ steps.release.outputs.version }}
           UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
         run: |
           tag="v${VERSION}"
-          git tag -a "${tag}" -F - <<EOF
+          # A rerun after a failed dispatch reuses the tag it already pushed.
+          if ! git ls-remote --exit-code --tags origin "refs/tags/${tag}" > /dev/null; then
+            git tag -a "${tag}" -F - <<EOF
           codexhost ${VERSION}
 
           ${GITHUB_REPOSITORY} build of ${UPSTREAM_REPOSITORY} at ${UPSTREAM_SHA:0:8}, keeping the fork's Codex managed accounts and Claude Code Goal bridge.
           Upstream changes: https://github.com/${UPSTREAM_REPOSITORY}/releases/tag/${tag}
           EOF
-          git push origin "refs/tags/${tag}"
-          # Pushes made with GITHUB_TOKEN trigger no workflows: run CI on main, then the
-          # Release workflow, which waits for that CI as its exact-commit evidence.
-          gh workflow run ci.yml --ref main
+            git push origin "refs/tags/${tag}"
+            # Pushes made with GITHUB_TOKEN trigger no workflows: run CI on main, which the
+            # Release workflow waits for as its exact-commit evidence.
+            gh workflow run ci.yml --ref main
+          fi
           gh workflow run release-packages.yml --ref main -f tag="${tag}" -f skip_npm=true
-          echo "Tagged ${tag} at $(git rev-parse --short HEAD); dispatched CI and Release packages." >> "$GITHUB_STEP_SUMMARY"
+          echo "Dispatched Release packages for ${tag}." >> "$GITHUB_STEP_SUMMARY"
