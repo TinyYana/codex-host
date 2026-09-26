@@ -108,7 +108,7 @@ npm 发布受阻时，可从默认分支手动运行 `Release packages`，指定
 
 ### Fork 的發布與更新來源
 
-TinyYana/codex-host 是持續跟進 upstream 的 downstream fork：Release 只發在 fork，只發安裝檔（`skip_npm`；npm 套件 `codexhost` 屬於上游，fork 的 trusted publishing 也不成立）。人工推送 tag 時自動觸發的那次 run 會嘗試 npm 發布，應立即取消，改用手動觸發並勾選 `skip_npm`。
+TinyYana/codex-host_TinyYanaFork 是持續跟進 upstream 的 downstream fork：Release 只發在 fork，只發安裝檔（`skip_npm`；npm 套件 `codexhost` 屬於上游，fork 的 trusted publishing 也不成立）。人工推送 tag 時自動觸發的那次 run 會嘗試 npm 發布，應立即取消，改用手動觸發並勾選 `skip_npm`。
 
 應用程式內的更新檢查只讀 fork 的 latest Release（`CODEXHOST_RELEASE_REPOSITORIES`）。上游安裝檔沒有 fork 自有能力，安裝它會讓多帳號與 Goal 修正消失；上游的新版本改由下方的同步自動發成 fork Release。安裝檔必須從所選 Release 同一個 repository 的 `releases/download/` 下載。
 

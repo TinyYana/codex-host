@@ -31,7 +31,7 @@ env:
 jobs:
   sync:
     name: Sync and release
-    if: github.repository == 'TinyYana/codex-host'
+    if: github.repository_owner == 'TinyYana'
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     permissions:
@@ -187,7 +187,7 @@ jobs:
           git tag -a "${tag}" -F - <<EOF
           codexhost ${VERSION}
 
-          TinyYana/codex-host build of ${UPSTREAM_REPOSITORY} at ${UPSTREAM_SHA:0:8}, keeping the fork's Codex managed accounts and Claude Code Goal bridge.
+          ${GITHUB_REPOSITORY} build of ${UPSTREAM_REPOSITORY} at ${UPSTREAM_SHA:0:8}, keeping the fork's Codex managed accounts and Claude Code Goal bridge.
           Upstream changes: https://github.com/${UPSTREAM_REPOSITORY}/releases/tag/${tag}
           EOF
           git push origin "refs/tags/${tag}"

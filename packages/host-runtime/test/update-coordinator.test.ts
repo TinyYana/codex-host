@@ -144,7 +144,7 @@ describe("Host update coordinator", () => {
       );
       // Only the fork is an update source: gh first, HTTP only as its fallback.
       expect(discovery.cli.mock.calls.map(([input]) => input.repository)).toEqual([
-        "TinyYana/codex-host",
+        "TinyYana/codex-host_TinyYanaFork",
       ]);
       expect(discovery.http).toHaveBeenCalledTimes(available ? 0 : 1);
       if (!available)

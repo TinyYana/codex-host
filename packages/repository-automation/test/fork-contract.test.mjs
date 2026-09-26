@@ -6,7 +6,7 @@ const root = path.resolve(import.meta.dirname, "../../..");
 const read = (file) => readFile(path.join(root, file), "utf8");
 
 /**
- * Capabilities TinyYana/codex-host keeps on top of upstream. An upstream merge
+ * Capabilities TinyYana/codex-host_TinyYanaFork keeps on top of upstream. An upstream merge
  * must not drop their code, their Host wiring, or the tests that exercise
  * them: Vitest discovers tests by glob, so a deleted test file would otherwise
  * shrink coverage silently. Behavior itself is covered by the listed tests.
@@ -85,7 +85,7 @@ const FORK_CAPABILITIES = [
     wiring: [
       {
         file: "packages/update-manager/src/github-release.ts",
-        includes: ['"TinyYana/codex-host"'],
+        includes: ['"TinyYana/codex-host_TinyYanaFork"'],
       },
     ],
     sources: ["CREDITS.md", "third-party/opencodex.LICENSE"],
@@ -142,7 +142,7 @@ describe("fork contract", () => {
   it("offers only fork builds as updates", async () => {
     const source = await read("packages/update-manager/src/github-release.ts");
     expect(source).toContain(
-      'export const CODEXHOST_RELEASE_REPOSITORIES = ["TinyYana/codex-host"] as const;',
+      'export const CODEXHOST_RELEASE_REPOSITORIES = ["TinyYana/codex-host_TinyYanaFork"] as const;',
     );
   });
 });

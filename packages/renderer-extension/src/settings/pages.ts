@@ -43,7 +43,10 @@ import {
 } from "./update-request.js";
 
 export const CODEXHOST_GITHUB_REPOSITORY_URL = "https://github.com/BytePioneer-AI/codex-host";
-export const CODEXHOST_RELEASES_LATEST_URL = `${CODEXHOST_GITHUB_REPOSITORY_URL}/releases/latest`;
+/** Releases come from the fork: upstream installers lack the fork's own capabilities. */
+export const CODEXHOST_RELEASE_REPOSITORY_URL =
+  "https://github.com/TinyYana/codex-host_TinyYanaFork";
+export const CODEXHOST_RELEASES_LATEST_URL = `${CODEXHOST_RELEASE_REPOSITORY_URL}/releases/latest`;
 export const CODEXHOST_NPM_MANUAL_UPDATE_COMMAND = "npm install -g @codexhost/cli@latest";
 
 interface RendererUserAgentData {
@@ -72,10 +75,10 @@ function windowsInstallerDownloadUrl(
   const hints = navigator ? rendererUserAgentData(navigator) : undefined;
   const identity = `${hints?.architecture ?? ""} ${hints?.platform ?? ""} ${navigator?.platform ?? ""} ${navigator?.userAgent ?? ""}`;
   const architecture = /arm64|aarch64|\barm\b/iu.test(identity) ? "arm64" : "x64";
-  // The newest Release may come from the fork or upstream; download from the one it names.
+  // Download from the Release the update check named.
   const download = releaseNotesUrl
     ? releaseNotesUrl.replace("/releases/tag/", "/releases/download/")
-    : `${CODEXHOST_GITHUB_REPOSITORY_URL}/releases/download/v${version}`;
+    : `${CODEXHOST_RELEASE_REPOSITORY_URL}/releases/download/v${version}`;
   return `${download}/codexhost-${version}-windows-${architecture}.exe`;
 }
 

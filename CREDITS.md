@@ -1,6 +1,6 @@
 # Credits / provenance
 
-`TinyYana/codex-host` 是 [BytePioneer-AI/codex-host](https://github.com/BytePioneer-AI/codex-host) 的 **maintained downstream fork**：持續跟進 upstream，同時保留 upstream 目前未提供或沒有計畫採納的修改。這不是已停止跟進 upstream 的獨立演化宣告。感謝 upstream 維護者、貢獻者與 [LINUX DO](https://linux.do/) 社群。
+`TinyYana/codex-host_TinyYanaFork` 是 [BytePioneer-AI/codex-host](https://github.com/BytePioneer-AI/codex-host) 的 **maintained downstream fork**：持續跟進 upstream，同時保留 upstream 目前未提供或沒有計畫採納的修改。這不是已停止跟進 upstream 的獨立演化宣告。感謝 upstream 維護者、貢獻者與 [LINUX DO](https://linux.do/) 社群。
 
 本頁是外部來源與貢獻分類的 Source of Truth；Git 保留逐次變更與作者，設計文件維護行為，完整 license／distribution notice 留在下列專屬入口。本頁不是完整 dependency 清單，也不把設計參考視為程式碼授權。
 
@@ -9,11 +9,11 @@
 | 來源 | 現行範圍與證據 | 分類 |
 | --- | --- | --- |
 | BytePioneer-AI/codex-host 及其貢獻者 | 本專案的直接程式碼基礎；upstream 自 [e81df5a1](https://github.com/BytePioneer-AI/codex-host/commit/e81df5a1647719f582b371eda7e22a76bcb7ce3f) 起改採 [LGPL-3.0-only](LICENSE)，fork 隨之採用；此前版本以 MIT（`Copyright (c) 2026 BytePioneer-AI`）發布。持續同步與 downstream 修改均由 Git ancestry 記錄。 | 直接 upstream；不能將繼承內容全部歸為 downstream 原創。 |
-| [SuperGoodGame / PR #221](https://github.com/BytePioneer-AI/codex-host/pull/221) | [原 commit 55db35dc](https://github.com/BytePioneer-AI/codex-host/commit/55db35dc1b6a3cc7266d4e058235f4bbf7e6f7cd) 的 Goal 部分與 review fixes，由 [cb2f5ea98b3e](https://github.com/TinyYana/codex-host/commit/cb2f5ea98b3eb6e6177fce1680f9b8c17b3f221c) re-land。現存 [Claude Goal](packages/adapters/claude-code/src/claude-goal.ts)、[Host Goal](packages/host-runtime/src/external-thread-goal.ts) 及 Claude Goal 測試與原 commit 相同；不包含該 PR 的 file-change 工作。 | 現行 upstream contributor code re-land，適用當時的 MIT LICENSE。 |
+| [SuperGoodGame / PR #221](https://github.com/BytePioneer-AI/codex-host/pull/221) | [原 commit 55db35dc](https://github.com/BytePioneer-AI/codex-host/commit/55db35dc1b6a3cc7266d4e058235f4bbf7e6f7cd) 的 Goal 部分與 review fixes，由 [cb2f5ea98b3e](https://github.com/TinyYana/codex-host_TinyYanaFork/commit/cb2f5ea98b3eb6e6177fce1680f9b8c17b3f221c) re-land。現存 [Claude Goal](packages/adapters/claude-code/src/claude-goal.ts)、[Host Goal](packages/host-runtime/src/external-thread-goal.ts) 及 Claude Goal 測試與原 commit 相同；不包含該 PR 的 file-change 工作。 | 現行 upstream contributor code re-land，適用當時的 MIT LICENSE。 |
 | [daodao97 / PR #117](https://github.com/BytePioneer-AI/codex-host/pull/117) | [f43252d0](https://github.com/BytePioneer-AI/codex-host/commit/f43252d0fa6b7746802528cce69b0bb076a7875d) 的 [AccountRateLimits](packages/host-runtime/src/codex-runtime/account-rate-limits.ts) cache、observe、reset、in-flight 核心仍在使用；[fb70e99a](https://github.com/BytePioneer-AI/codex-host/commit/fb70e99a22f434046fbf5c1c638183d45f11b093) 與 f43252d0 的 [帳號／usage 契約](packages/shared-contracts/src/codex-accounts.ts) 仍有存續。 | 部分現行 upstream contribution；舊 per-account home／runtime pool／Thread routing 架構屬歷史，不代表整份貢獻已消失。 |
-| [BytePioneer-AI / PR #252](https://github.com/BytePioneer-AI/codex-host/pull/252)、[PR #262](https://github.com/BytePioneer-AI/codex-host/pull/262) | [ead8028d 的設計 §3](https://github.com/TinyYana/codex-host/blob/ead8028d716c809b10128ff6a7559c949dde93ad/docs/codex-native-account-switching-design.md) 記錄從 #252 選擇性移植私有檔案、process supervision、全域帳號契約／Renderer 及測試。現行 [process supervision](crates/platform/src/process_supervision.rs) 的退出等待仍延續 ead8028d。 | Upstream native-account 前身與延續；這裡依歷史設計與現行 blame 記錄，不宣稱已逐行核對 #252 的全部原始碼。 |
+| [BytePioneer-AI / PR #252](https://github.com/BytePioneer-AI/codex-host/pull/252)、[PR #262](https://github.com/BytePioneer-AI/codex-host/pull/262) | [ead8028d 的設計 §3](https://github.com/TinyYana/codex-host_TinyYanaFork/blob/ead8028d716c809b10128ff6a7559c949dde93ad/docs/codex-native-account-switching-design.md) 記錄從 #252 選擇性移植私有檔案、process supervision、全域帳號契約／Renderer 及測試。現行 [process supervision](crates/platform/src/process_supervision.rs) 的退出等待仍延續 ead8028d。 | Upstream native-account 前身與延續；這裡依歷史設計與現行 blame 記錄，不宣稱已逐行核對 #252 的全部原始碼。 |
 
-原 #117 架構被 #262 取代；[f3592bdb](https://github.com/TinyYana/codex-host/commit/f3592bdb02ce9b938ed29be25b8051c48ccc50dc) 曾移除多帳號管理。現行 [2849d82e](https://github.com/TinyYana/codex-host/commit/2849d82ef6afdd988098476cf567a1c5e53c376e) 再重落縮小範圍的原生交易核心，改採明確保存目前帳號、不提供 Host login、不終止外部 Codex 行程。詳見[現行帳號設計](docs/product/codex-native-account-switching-design.md)。
+原 #117 架構被 #262 取代；[f3592bdb](https://github.com/TinyYana/codex-host_TinyYanaFork/commit/f3592bdb02ce9b938ed29be25b8051c48ccc50dc) 曾移除多帳號管理。現行 [2849d82e](https://github.com/TinyYana/codex-host_TinyYanaFork/commit/2849d82ef6afdd988098476cf567a1c5e53c376e) 再重落縮小範圍的原生交易核心，改採明確保存目前帳號、不提供 Host login、不終止外部 Codex 行程。詳見[現行帳號設計](docs/product/codex-native-account-switching-design.md)。
 
 ## 第三方實作與素材 reuse
 
@@ -22,7 +22,7 @@
 [lidge-jun/opencodex](https://github.com/lidge-jun/opencodex/tree/2d4d7a22381a2e497c2442902104619e25f937c7)，來源固定於 `2d4d7a22381a2e497c2442902104619e25f937c7`。這是 **adapted / reused code 與設計來源**，不能只稱 inspiration。
 
 - 現行 [native credential envelope](packages/host-runtime/src/account/native-codex-credentials.ts) 與 [inactive quota reading](packages/host-runtime/src/account/native-account-quotas.ts) 的來源由 [implementation design](openspec/changes/implement-codex-native-accounts/design.md) 明確記錄；引入 lineage 可追到 ead8028d。
-- 原 native profile manager/store/recovery/stage-store 曾是 credential transaction、加密儲存、staging 與 recovery 的重要設計參考。舊 `native-profile-transaction.ts`／`native-profile-vault.ts` 在 [fa700d4e](https://github.com/TinyYana/codex-host/commit/fa700d4eb2ef21873b8a642f6d562c3489abea50) 移除；不能因此宣稱現版仍採用那套完整 journal／encrypted vault／staging 實作，也不能刪除仍存續 reuse 的 notice。
+- 原 native profile manager/store/recovery/stage-store 曾是 credential transaction、加密儲存、staging 與 recovery 的重要設計參考。舊 `native-profile-transaction.ts`／`native-profile-vault.ts` 在 [fa700d4e](https://github.com/TinyYana/codex-host_TinyYanaFork/commit/fa700d4eb2ef21873b8a642f6d562c3489abea50) 移除；不能因此宣稱現版仍採用那套完整 journal／encrypted vault／staging 實作，也不能刪除仍存續 reuse 的 notice。
 - 保留 [完整 MIT license](third-party/opencodex.LICENSE)，copyright 為 `2026 opencodex contributors`，對應[固定版原文](https://github.com/lidge-jun/opencodex/blob/2d4d7a22381a2e497c2442902104619e25f937c7/LICENSE)。installer payload 與 npm package 均分發 `licenses/opencodex-LICENSE.txt`，並在 `THIRD_PARTY_NOTICES.txt` 記錄來源、revision 與 license 路徑。
 
 ### 其他已有專屬來源記錄

@@ -53,7 +53,7 @@ describe("GitHub Release update discovery", () => {
   });
 
   it("accepts the fork as a second source and keeps each download inside its own repository", () => {
-    const forkUrl = "https://github.com/TinyYana/codex-host/releases";
+    const forkUrl = "https://github.com/TinyYana/codex-host_TinyYanaFork/releases";
     const forkAsset = {
       ...release().assets[0],
       browser_download_url: `${forkUrl}/download/v1.2.3/codexhost-1.2.3-windows-x64.exe`,
