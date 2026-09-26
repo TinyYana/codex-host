@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - main
+  # Upstream sync dispatches CI on its branch; GITHUB_TOKEN pushes and PRs do not trigger it.
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -110,6 +110,17 @@ npm 发布受阻时，可从默认分支手动运行 `Release packages`，指定
 
 TinyYana/codex-host 是 hard fork：Release 只發在 fork，一律用上面的 `skip_npm` 手動觸發（npm 套件 `codexhost` 屬於上游，fork 的 trusted publishing 也不成立）。推送 tag 時自動觸發的那次 run 會嘗試 npm 發布，應立即取消。
 
+### Fork 的 upstream 同步
+
+`.github/workflows/upstream-sync.yml` 每日（及手動）檢查 `BytePioneer-AI/codex-host` 的 `main`，只用一般 merge commit 保留 fork 歷史，不 rebase、不寫入或 force-push `main`：
+
+- `main` 已包含 upstream HEAD，或 `sync/upstream` 已經在目前 `main` 上合入同一個 upstream commit：只寫 Summary 後結束，不產生 commit、push 或 PR。
+- 有新進度：從 `main` 重建 `sync/upstream` 並 `merge --no-ff upstream/main`；先跑 fork 契約，再跑 `npm run check`，全部通過才 force-with-lease 更新這個專用分支、建立或更新唯一的 PR，並對該分支 dispatch `ci.yml`（`GITHUB_TOKEN` 建立的 PR 與 push 不會觸發 CI，因此 `ci.yml` 增加了 `workflow_dispatch`）。
+- 衝突：不 push，job 失敗並在 Summary 列出衝突檔，附 `upstream-sync-conflict` artifact（衝突檔清單、`git status`、含衝突標記的 diff、待合入的 upstream commits），交給維護者或 agent 在本地 merge 後開 PR。倉庫目前沒有已授權的 Claude Code GitHub automation，workflow 不會自動修衝突或 CI。
+- 建立 PR 需要倉庫設定 *Actions → General → Allow GitHub Actions to create and approve pull requests*。未啟用時分支仍會推送，job 會失敗並給出 compare 連結。
+
+Fork 自有能力的保護寫在 `packages/repository-automation/test/fork-contract.test.mjs`：Codex managed/multi-account、Claude Goal bridge、fork 與 upstream 雙更新來源的原始碼、Host／Renderer 接線點與專屬測試檔必須仍存在（Vitest 以 glob 探索測試，被 merge 刪掉的測試檔不會讓套件失敗，所以由契約檢查它們），行為由列出的測試驗證。新增 fork 自有能力時同步更新該清單。
+
 應用程式內的更新檢查同時讀取 fork 與上游的 latest Release（`CODEXHOST_RELEASE_REPOSITORIES`，fork 在前），取版本較新的一個；版本相同時保留 fork，避免上游同版號覆蓋 fork 版。任一來源無法連線或沒有 Release 時只用另一個。安裝檔必須從所選 Release 同一個 repository 的 `releases/download/` 下載，不接受跨 repository 的資產網址。
 
 ## 验证
