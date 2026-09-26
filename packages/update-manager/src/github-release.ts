@@ -1,12 +1,13 @@
 import type { ArtifactSource } from "./artifact.js";
 import { requireSemanticVersion } from "./status.js";
 
-/** Fork first: on equal versions the fork build wins, so upstream never silently replaces it. */
-export const CODEXHOST_RELEASE_REPOSITORIES = [
-  "TinyYana/codex-host",
-  "BytePioneer-AI/codex-host",
-] as const;
-export type CodexhostReleaseRepository = (typeof CODEXHOST_RELEASE_REPOSITORIES)[number];
+/**
+ * Update sources, earliest winning a version tie. Only the fork is offered:
+ * an upstream installer lacks the fork's own capabilities, and upstream
+ * releases reach users through the fork's automated sync release.
+ */
+export const CODEXHOST_RELEASE_REPOSITORIES = ["TinyYana/codex-host"] as const;
+export type CodexhostReleaseRepository = "TinyYana/codex-host" | "BytePioneer-AI/codex-host";
 const UPSTREAM_REPOSITORY: CodexhostReleaseRepository = "BytePioneer-AI/codex-host";
 
 export function codexhostLatestReleaseUrl(

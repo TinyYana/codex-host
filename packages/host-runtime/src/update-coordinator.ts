@@ -78,7 +78,7 @@ export function createHostUpdateCoordinator(
     (async (signal?: AbortSignal) => {
       const timeoutSignal = AbortSignal.timeout(15_000);
       const requestSignal = signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
-      // Fork and upstream are both update sources; one unreachable source does not block the other.
+      // Each update source is discovered independently; one unreachable source does not block another.
       const results = await Promise.allSettled(
         CODEXHOST_RELEASE_REPOSITORIES.map(async (repository) => {
           const authenticated = await fetchLatestGitHubReleaseWithGitHubCli({

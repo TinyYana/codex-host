@@ -1,9 +1,16 @@
 name: Upstream sync
 
-# Keeps this downstream fork on upstream/main through ordinary merge commits.
-# No upstream progress: exits quietly. New progress: merges on a dedicated
-# branch, runs the repository check plus the fork contract, then opens or
-# updates one PR and dispatches the full CI matrix on it. Never writes main.
+# Keeps this downstream fork on upstream/main with ordinary merge commits and
+# ships each upstream version as a fork Release, so updates never replace the
+# fork's own capabilities with an upstream build.
+#
+# - Nothing new and the current version already released: exits quietly.
+# - New upstream commits: merges them, runs the fork contract and
+#   `npm run check`, then fast-forwards main (never force).
+# - main's version has no fork Release yet: tags it, dispatches CI on main and
+#   the Release workflow (installers only; npm belongs to upstream).
+# - Anything needing judgment (non-version conflicts, upstream workflow edits
+#   the token cannot push, failed checks) fails with evidence instead.
 on:
   schedule:
     - cron: "23 2 * * *"
@@ -17,84 +24,97 @@ concurrency:
 
 env:
   UPSTREAM_REPOSITORY: BytePioneer-AI/codex-host
-  BASE_BRANCH: main
-  SYNC_BRANCH: sync/upstream
   CARGO_INCREMENTAL: "0"
   CARGO_PROFILE_DEV_DEBUG: "0"
   CARGO_PROFILE_TEST_DEBUG: "0"
 
 jobs:
   sync:
-    name: Merge upstream main
+    name: Sync and release
     if: github.repository == 'TinyYana/codex-host'
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     permissions:
       actions: write
       contents: write
-      pull-requests: write
     steps:
-      - name: Checkout fork
+      - name: Checkout main
         uses: actions/checkout@v4
         with:
-          ref: ${{ env.BASE_BRANCH }}
+          ref: main
           fetch-depth: 0
 
       - name: Detect upstream progress
         id: detect
         run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git remote add upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
           git fetch --no-tags upstream main
           upstream_sha="$(git rev-parse upstream/main)"
           echo "upstream_sha=${upstream_sha}" >> "$GITHUB_OUTPUT"
           if git merge-base --is-ancestor upstream/main HEAD; then
-            echo "state=current" >> "$GITHUB_OUTPUT"
-            echo "${BASE_BRANCH} already contains ${UPSTREAM_REPOSITORY}@${upstream_sha}." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+            echo "merge=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "merge=true" >> "$GITHUB_OUTPUT"
           fi
-          # An open proposal that already merges this upstream commit onto the
-          # current base needs no new run.
-          if git fetch --no-tags origin "refs/heads/${SYNC_BRANCH}:refs/remotes/origin/${SYNC_BRANCH}" 2>/dev/null &&
-            git merge-base --is-ancestor upstream/main "origin/${SYNC_BRANCH}" &&
-            git merge-base --is-ancestor HEAD "origin/${SYNC_BRANCH}"; then
-            echo "state=proposed" >> "$GITHUB_OUTPUT"
-            echo "${SYNC_BRANCH} already proposes ${UPSTREAM_REPOSITORY}@${upstream_sha}." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          echo "state=behind" >> "$GITHUB_OUTPUT"
 
       - name: Merge upstream main
         id: merge
-        if: steps.detect.outputs.state == 'behind'
+        if: steps.detect.outputs.merge == 'true'
         env:
           UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git switch -C "${SYNC_BRANCH}"
-          if git merge --no-ff --no-edit \
-            -m "merge: sync upstream ${UPSTREAM_REPOSITORY} main (${UPSTREAM_SHA:0:8})" upstream/main; then
-            exit 0
+          message="merge: sync upstream ${UPSTREAM_REPOSITORY} main (${UPSTREAM_SHA:0:8})"
+          if ! git merge --no-ff --no-edit -m "${message}" upstream/main; then
+            conflicted="$(git diff --name-only --diff-filter=U)"
+            # Release preparation conflicts are the routine case: keep the higher version.
+            if [ -n "${conflicted}" ] && ! grep -qvxE 'package\.json|package-lock\.json|Cargo\.toml|Cargo\.lock' <<< "${conflicted}"; then
+              ours="$(git show HEAD:package.json | jq -r .version)"
+              theirs="$(git show upstream/main:package.json | jq -r .version)"
+              if [ "$(printf '%s\n%s\n' "${ours}" "${theirs}" | sort -V | tail -n1)" = "${ours}" ]; then side=ours; else side=theirs; fi
+              git checkout "--${side}" -- ${conflicted}
+              git add -- ${conflicted}
+              git commit --no-edit -m "${message}"
+              echo "Resolved version-only conflicts with the ${side} side (${ours} vs ${theirs})." >> "$GITHUB_STEP_SUMMARY"
+            else
+              # Leave evidence an agent or maintainer can resolve from; never push a conflicted tree.
+              mkdir -p sync-evidence
+              printf '%s\n' "${conflicted}" > sync-evidence/conflicted-files.txt
+              git status --porcelain=v1 > sync-evidence/status.txt
+              git diff > sync-evidence/conflicts.diff
+              git log --oneline "HEAD..upstream/main" > sync-evidence/upstream-commits.txt
+              {
+                echo "## Upstream merge conflict"
+                echo
+                echo "Merging ${UPSTREAM_REPOSITORY}@${UPSTREAM_SHA} into main stopped on conflicts. Resolve with"
+                echo "\`git fetch upstream && git merge upstream/main\` on main, keeping the capabilities in"
+                echo "\`packages/repository-automation/test/fork-contract.test.mjs\`, then push; the next run releases it."
+                echo
+                echo '```text'
+                cat sync-evidence/conflicted-files.txt
+                echo '```'
+              } >> "$GITHUB_STEP_SUMMARY"
+              echo "::error::Upstream merge conflicts; see the job summary and the upstream-sync-conflict artifact."
+              exit 1
+            fi
           fi
-          # Leave evidence an agent or maintainer can resolve from; never push a conflicted tree.
-          mkdir -p sync-evidence
-          git diff --name-only --diff-filter=U > sync-evidence/conflicted-files.txt
-          git status --porcelain=v1 > sync-evidence/status.txt
-          git diff > sync-evidence/conflicts.diff
-          git log --oneline "HEAD..upstream/main" > sync-evidence/upstream-commits.txt
-          {
-            echo "## Upstream merge conflict"
-            echo
-            echo "Merging ${UPSTREAM_REPOSITORY}@${UPSTREAM_SHA} into ${BASE_BRANCH} stopped on conflicts."
-            echo "Resolve locally with \`git fetch upstream && git merge upstream/main\` on a branch from ${BASE_BRANCH},"
-            echo "keep the fork capabilities listed in \`packages/repository-automation/test/fork-contract.test.mjs\`, and open a PR."
-            echo
-            echo '```text'
-            cat sync-evidence/conflicted-files.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-          echo "::error::Upstream merge conflicts; see the job summary and the upstream-sync-conflict artifact."
-          exit 1
+          # GITHUB_TOKEN cannot push workflow changes; a person pushes this merge instead.
+          if ! git diff --quiet HEAD^1 HEAD -- .github/workflows; then
+            {
+              echo "## Upstream changed workflows"
+              echo
+              echo "GitHub does not let workflow tokens push \`.github/workflows\` changes. Run locally:"
+              echo
+              echo '```bash'
+              echo "git switch main && git pull && git fetch upstream && git merge upstream/main && npm run check && git push"
+              echo '```'
+              echo
+              echo "The next run releases the merged version."
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Upstream changed .github/workflows; push this merge manually (see the job summary)."
+            exit 1
+          fi
 
       - name: Upload conflict evidence
         if: failure() && steps.merge.outcome == 'failure'
@@ -102,64 +122,77 @@ jobs:
         with:
           name: upstream-sync-conflict
           path: sync-evidence/
+          if-no-files-found: ignore
           retention-days: 14
 
+      - name: Resolve release
+        id: release
+        run: |
+          version="$(jq -r .version package.json)"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/v${version}" > /dev/null; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Nothing to do
+        if: steps.detect.outputs.merge == 'false' && steps.release.outputs.needed == 'false'
+        run: echo "main contains ${UPSTREAM_REPOSITORY}@${{ steps.detect.outputs.upstream_sha }} and v${{ steps.release.outputs.version }} is released." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Setup Node.js
-        if: steps.detect.outputs.state == 'behind'
+        if: steps.detect.outputs.merge == 'true'
         uses: actions/setup-node@v4
         with:
           node-version-file: .node-version
           cache: npm
 
       - name: Setup npm
-        if: steps.detect.outputs.state == 'behind'
+        if: steps.detect.outputs.merge == 'true'
         run: npm install --global --prefer-offline npm@11.8.0
 
       - name: Setup Rust
-        if: steps.detect.outputs.state == 'behind'
+        if: steps.detect.outputs.merge == 'true'
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: 1.97.1
           components: clippy, rustfmt
 
       - name: Install dependencies
-        if: steps.detect.outputs.state == 'behind'
+        if: steps.detect.outputs.merge == 'true'
         run: npm ci --prefer-offline
 
       # Fails fast and by name when a merge dropped a fork capability or its tests.
       - name: Check fork contract
-        if: steps.detect.outputs.state == 'behind'
+        if: steps.detect.outputs.merge == 'true'
         run: npx vitest run --config tests/vitest.config.js packages/repository-automation/test/fork-contract.test.mjs
 
       - name: Repository check
-        if: steps.detect.outputs.state == 'behind'
+        if: steps.detect.outputs.merge == 'true'
         run: npm run check
 
-      - name: Publish sync branch and PR
-        if: steps.detect.outputs.state == 'behind'
+      # A plain push: it is rejected, not forced, if main moved during the run.
+      - name: Fast-forward main
+        if: steps.detect.outputs.merge == 'true'
+        run: git push origin HEAD:refs/heads/main
+
+      - name: Release fork build
+        if: steps.release.outputs.needed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release.outputs.version }}
           UPSTREAM_SHA: ${{ steps.detect.outputs.upstream_sha }}
         run: |
-          # The sync branch is regenerated from the base each run; only it is force-updated.
-          git push --force-with-lease origin "HEAD:refs/heads/${SYNC_BRANCH}"
-          title="merge: sync upstream ${UPSTREAM_REPOSITORY} main (${UPSTREAM_SHA:0:8})"
-          body="$(printf 'Merges [%s@%s](https://github.com/%s/commit/%s) into `%s` with an ordinary merge commit.\n\nVerified in the sync run before this PR was opened or updated: fork contract and `npm run check`. The full CI matrix is dispatched on `%s`.\n\nRun: %s/%s/actions/runs/%s' \
-            "${UPSTREAM_REPOSITORY}" "${UPSTREAM_SHA:0:8}" "${UPSTREAM_REPOSITORY}" "${UPSTREAM_SHA}" "${BASE_BRANCH}" \
-            "${SYNC_BRANCH}" "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}")"
-          number="$(gh pr list --head "${SYNC_BRANCH}" --base "${BASE_BRANCH}" --state open --json number --jq '.[0].number // empty')"
-          if [ -n "${number}" ]; then
-            gh pr edit "${number}" --title "${title}" --body "${body}"
-          elif ! gh pr create --head "${SYNC_BRANCH}" --base "${BASE_BRANCH}" --title "${title}" --body "${body}"; then
-            {
-              echo "## Sync branch pushed, PR not created"
-              echo
-              echo "Verified merge is on \`${SYNC_BRANCH}\`. GitHub refused the PR for this token;"
-              echo "enable *Settings → Actions → General → Allow GitHub Actions to create and approve pull requests*,"
-              echo "or open it manually: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${BASE_BRANCH}...${SYNC_BRANCH}"
-            } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::Could not create the sync PR; see the job summary."
-            exit 1
-          fi
-          # PRs and pushes made with GITHUB_TOKEN do not trigger CI; dispatch it explicitly.
-          gh workflow run ci.yml --ref "${SYNC_BRANCH}"
+          tag="v${VERSION}"
+          git tag -a "${tag}" -F - <<EOF
+          codexhost ${VERSION}
+
+          TinyYana/codex-host build of ${UPSTREAM_REPOSITORY} at ${UPSTREAM_SHA:0:8}, keeping the fork's Codex managed accounts and Claude Code Goal bridge.
+          Upstream changes: https://github.com/${UPSTREAM_REPOSITORY}/releases/tag/${tag}
+          EOF
+          git push origin "refs/tags/${tag}"
+          # Pushes made with GITHUB_TOKEN trigger no workflows: run CI on main, then the
+          # Release workflow, which waits for that CI as its exact-commit evidence.
+          gh workflow run ci.yml --ref main
+          gh workflow run release-packages.yml --ref main -f tag="${tag}" -f skip_npm=true
+          echo "Tagged ${tag} at $(git rev-parse --short HEAD); dispatched CI and Release packages." >> "$GITHUB_STEP_SUMMARY"

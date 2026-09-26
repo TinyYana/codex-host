@@ -33,7 +33,6 @@ describe("live CI evidence and target routing", () => {
       expect.objectContaining({
         workflow_id: 1,
         head_sha: head,
-        event: "push",
         branch: "main",
         per_page: 100,
       }),
@@ -53,6 +52,13 @@ describe("live CI evidence and target routing", () => {
     const github = githubFixture(invalid);
     expect((await readCi({ github, repo, sha: head, release: true })).run).toBeUndefined();
     expect(github.rest.actions.listJobsForWorkflowRun).not.toHaveBeenCalled();
+  });
+
+  it("accepts CI dispatched on main, since automated main updates trigger no push CI", async () => {
+    const github = githubFixture([ci({ event: "workflow_dispatch" }).run]);
+    expect((await readCi({ github, repo, sha: head, release: true })).run?.event).toBe(
+      "workflow_dispatch",
+    );
   });
 
   it("matches fork PR CI by head repository even when GitHub has no associated PR array", async () => {

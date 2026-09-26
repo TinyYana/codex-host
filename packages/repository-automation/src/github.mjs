@@ -1,4 +1,4 @@
-import { CI_WORKFLOW } from "./policy.mjs";
+import { CI_WORKFLOW, RELEASE_CI_EVENTS } from "./policy.mjs";
 
 export async function list(github, method, parameters) {
   return github.paginate(method, { ...parameters, per_page: 100 });
@@ -22,13 +22,13 @@ export async function readCi({ github, repo, sha, release = false, pr }) {
     ...repo,
     workflow_id: workflow.id,
     head_sha: sha,
-    ...(release ? { event: "push", branch: "main" } : {}),
+    ...(release ? { branch: "main" } : {}),
   });
   const eligible = runs.filter((run) => {
     if (run.workflow_id !== workflow.id || run.head_sha !== sha) return false;
     if (release) {
       return (
-        run.event === "push" &&
+        RELEASE_CI_EVENTS.has(run.event) &&
         run.head_branch === "main" &&
         run.head_repository?.full_name === `${repo.owner}/${repo.repo}`
       );

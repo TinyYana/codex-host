@@ -98,7 +98,7 @@ npm run test:typescript -- \
 
 1. 标签必须是合法 SemVer 的 annotated tag，正文包含 Release Notes；提交在 `main` 历史上。
 2. `package.json`、`package-lock.json` 根版本及 Cargo workspace 版本必须与标签一致。
-3. 确切发布 SHA 的主仓库 `main push` CI 和四项基线 job 必须成功。
+3. 确切发布 SHA 的主仓库 `main` CI（`push`，或自动化在 `main` 上 `workflow_dispatch` 的运行）和四项基线 job 必须成功。
 4. 构建和发布固定 commit SHA；发布前再次验证远端 tag object SHA、提交仍在 `main`、CI run ID / attempt 和结果。
 5. 校验失败就停止发布，不自动改版本、等待后重试或放宽条件；维护者核实后手动重新准备发布。
 
@@ -106,22 +106,24 @@ npm 发布受阻时，可从默认分支手动运行 `Release packages`，指定
 
 标签推送使用标签提交里的工作流定义，新校验不会追溯改写旧标签的发布逻辑。这不是不可绕过的权限控制；未设置分支、标签或发布环境保护。
 
-### Fork 的發布與雙重更新來源
+### Fork 的發布與更新來源
 
-TinyYana/codex-host 是 hard fork：Release 只發在 fork，一律用上面的 `skip_npm` 手動觸發（npm 套件 `codexhost` 屬於上游，fork 的 trusted publishing 也不成立）。推送 tag 時自動觸發的那次 run 會嘗試 npm 發布，應立即取消。
+TinyYana/codex-host 是持續跟進 upstream 的 downstream fork：Release 只發在 fork，只發安裝檔（`skip_npm`；npm 套件 `codexhost` 屬於上游，fork 的 trusted publishing 也不成立）。人工推送 tag 時自動觸發的那次 run 會嘗試 npm 發布，應立即取消，改用手動觸發並勾選 `skip_npm`。
 
-### Fork 的 upstream 同步
+應用程式內的更新檢查只讀 fork 的 latest Release（`CODEXHOST_RELEASE_REPOSITORIES`）。上游安裝檔沒有 fork 自有能力，安裝它會讓多帳號與 Goal 修正消失；上游的新版本改由下方的同步自動發成 fork Release。安裝檔必須從所選 Release 同一個 repository 的 `releases/download/` 下載。
 
-`.github/workflows/upstream-sync.yml` 每日（及手動）檢查 `BytePioneer-AI/codex-host` 的 `main`，只用一般 merge commit 保留 fork 歷史，不 rebase、不寫入或 force-push `main`：
+### Fork 的 upstream 同步與自動發布
 
-- `main` 已包含 upstream HEAD，或 `sync/upstream` 已經在目前 `main` 上合入同一個 upstream commit：只寫 Summary 後結束，不產生 commit、push 或 PR。
-- 有新進度：從 `main` 重建 `sync/upstream` 並 `merge --no-ff upstream/main`；先跑 fork 契約，再跑 `npm run check`，全部通過才 force-with-lease 更新這個專用分支、建立或更新唯一的 PR，並對該分支 dispatch `ci.yml`（`GITHUB_TOKEN` 建立的 PR 與 push 不會觸發 CI，因此 `ci.yml` 增加了 `workflow_dispatch`）。
-- 衝突：不 push，job 失敗並在 Summary 列出衝突檔，附 `upstream-sync-conflict` artifact（衝突檔清單、`git status`、含衝突標記的 diff、待合入的 upstream commits），交給維護者或 agent 在本地 merge 後開 PR。倉庫目前沒有已授權的 Claude Code GitHub automation，workflow 不會自動修衝突或 CI。
-- 建立 PR 需要倉庫設定 *Actions → General → Allow GitHub Actions to create and approve pull requests*。未啟用時分支仍會推送，job 會失敗並給出 compare 連結。
+`.github/workflows/upstream-sync.yml` 每日（及手動）執行，只用一般 merge commit 保留 fork 歷史，不 rebase、不 force-push：
 
-Fork 自有能力的保護寫在 `packages/repository-automation/test/fork-contract.test.mjs`：Codex managed/multi-account、Claude Goal bridge、fork 與 upstream 雙更新來源的原始碼、Host／Renderer 接線點與專屬測試檔必須仍存在（Vitest 以 glob 探索測試，被 merge 刪掉的測試檔不會讓套件失敗，所以由契約檢查它們），行為由列出的測試驗證。新增 fork 自有能力時同步更新該清單。
+- `main` 已包含 `BytePioneer-AI/codex-host` 的 `main`，且目前版本已有 fork tag：只寫 Summary，不產生 commit、tag 或 Release。
+- 有新進度：在 `main` 上 `merge --no-ff upstream/main`。只有 `package.json`、`package-lock.json`、`Cargo.toml`、`Cargo.lock` 衝突時（雙方各自準備版本），取版本較高的一方。接著跑 fork 契約與 `npm run check`，全部通過才以一般 push 前進 `main`；期間 `main` 被人推進時 push 會被拒，下次再跑。
+- `main` 的版本還沒有 fork tag：建立 annotated tag `v<version>`，對 `main` dispatch `ci.yml` 與 `Release packages`（`skip_npm=true`）。`GITHUB_TOKEN` 的 push 不觸發任何 workflow，所以發布的 CI 證據接受 `main` 上 `workflow_dispatch` 的 CI（`RELEASE_CI_EVENTS`），Release 會等它完成才打包。
+- 需要判斷的情況一律失敗並留下證據，不推送：非版本檔衝突（Summary 列出衝突檔，附 `upstream-sync-conflict` artifact：衝突檔清單、`git status`、含衝突標記的 diff、待合入 commits）、上游修改了 `.github/workflows`（workflow token 不能推送這類變更，Summary 給出本地合併指令）、檢查失敗。人工或 agent 在本地合併並推送後，下一次執行會自動發布。倉庫沒有已授權的 Claude Code GitHub automation，workflow 不會自動修衝突或 CI。
 
-應用程式內的更新檢查同時讀取 fork 與上游的 latest Release（`CODEXHOST_RELEASE_REPOSITORIES`，fork 在前），取版本較新的一個；版本相同時保留 fork，避免上游同版號覆蓋 fork 版。任一來源無法連線或沒有 Release 時只用另一個。安裝檔必須從所選 Release 同一個 repository 的 `releases/download/` 下載，不接受跨 repository 的資產網址。
+Fork 自有能力的保護寫在 `packages/repository-automation/test/fork-contract.test.mjs`：Codex managed/multi-account、Claude Goal bridge 與 fork-only 更新來源的原始碼、Host／Renderer 接線點與專屬測試檔必須仍存在（Vitest 以 glob 探索測試，被 merge 刪掉的測試檔不會讓套件失敗，所以由契約檢查它們），行為由列出的測試驗證。新增 fork 自有能力時同步更新該清單。
+
+Fork 自己在兩次上游發版之間修正時，照上面的人工流程以 patch 版本發布（例如上游 `0.11.0` 後發 `0.11.1`）；之後上游同步在版本檔衝突時取較高版本，不會降版。
 
 ## 验证
 

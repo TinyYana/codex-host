@@ -1,5 +1,7 @@
 // Repository governance only: no Host, Harness, or model runtime dependencies.
 export const CI_WORKFLOW = "ci.yml";
+// A main push, or CI dispatched on main by automation whose GITHUB_TOKEN pushes trigger no workflow.
+export const RELEASE_CI_EVENTS = new Set(["push", "workflow_dispatch"]);
 export const CI_JOBS = [
   "Check ubuntu-22.04",
   "Check macos-14",

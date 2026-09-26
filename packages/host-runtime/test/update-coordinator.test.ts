@@ -142,12 +142,11 @@ describe("Host update coordinator", () => {
       expect(discovery.cli).toHaveBeenCalledWith(
         expect.objectContaining({ environment: fixture.environment, platform: "darwin" }),
       );
-      // Fork and upstream are each discovered, gh first, HTTP only as that source's fallback.
+      // Only the fork is an update source: gh first, HTTP only as its fallback.
       expect(discovery.cli.mock.calls.map(([input]) => input.repository)).toEqual([
         "TinyYana/codex-host",
-        "BytePioneer-AI/codex-host",
       ]);
-      expect(discovery.http).toHaveBeenCalledTimes(available ? 0 : 2);
+      expect(discovery.http).toHaveBeenCalledTimes(available ? 0 : 1);
       if (!available)
         expect(discovery.http.mock.calls[0]?.[0].signal).toBe(
           discovery.cli.mock.calls[0]?.[0].signal,

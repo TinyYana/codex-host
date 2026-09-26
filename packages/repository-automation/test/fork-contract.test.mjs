@@ -81,11 +81,11 @@ const FORK_CAPABILITIES = [
     ],
   },
   {
-    name: "Fork and upstream release sources",
+    name: "Fork-only release source",
     wiring: [
       {
         file: "packages/update-manager/src/github-release.ts",
-        includes: ['"TinyYana/codex-host"', '"BytePioneer-AI/codex-host"'],
+        includes: ['"TinyYana/codex-host"'],
       },
     ],
     sources: ["CREDITS.md", "third-party/opencodex.LICENSE"],
@@ -120,22 +120,29 @@ describe("fork contract", () => {
     expect(missing).toEqual([]);
   });
 
-  it("syncs upstream by merge on a dedicated branch without writing main", async () => {
+  it("syncs upstream by verified merges and ships them as fork Releases", async () => {
     const workflow = await read(".github/workflows/upstream-sync.yml");
     expect(workflow).toContain("git merge --no-ff");
-    expect(workflow).not.toMatch(/git rebase|git push[^\n]*\bmain\b|reset --hard/u);
-    expect(workflow).toContain(
-      'git push --force-with-lease origin "HEAD:refs/heads/${SYNC_BRANCH}"',
-    );
-    expect(workflow).toContain("SYNC_BRANCH: sync/upstream");
-    // Quiet when nothing is new, verified before any PR is opened.
+    expect(workflow).not.toMatch(/git rebase|--force|push -f|reset --hard/u);
+    // Quiet when upstream is merged and the version released; verified before main moves.
     expect(workflow).toContain("git merge-base --is-ancestor upstream/main HEAD");
+    const contract = workflow.indexOf("fork-contract.test.mjs");
     const check = workflow.indexOf("run: npm run check");
-    expect(check).toBeGreaterThan(workflow.indexOf("fork-contract.test.mjs"));
-    expect(workflow.indexOf("gh pr create")).toBeGreaterThan(check);
-    // Conflicts fail loudly with evidence instead of pushing a broken tree.
+    const push = workflow.indexOf("git push origin HEAD:refs/heads/main");
+    expect(contract).toBeGreaterThan(0);
+    expect(check).toBeGreaterThan(contract);
+    expect(push).toBeGreaterThan(check);
+    // Conflicts needing judgment fail loudly with evidence instead of pushing a broken tree.
     expect(workflow).toContain("name: upstream-sync-conflict");
+    expect(workflow).toContain("-f skip_npm=true");
     expect(workflow).not.toMatch(/secrets\./u);
     await expect(read(".github/workflows/ci.yml")).resolves.toContain("workflow_dispatch:");
+  });
+
+  it("offers only fork builds as updates", async () => {
+    const source = await read("packages/update-manager/src/github-release.ts");
+    expect(source).toContain(
+      'export const CODEXHOST_RELEASE_REPOSITORIES = ["TinyYana/codex-host"] as const;',
+    );
   });
 });

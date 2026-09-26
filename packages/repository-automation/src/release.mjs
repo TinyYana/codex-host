@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { CI_JOBS, SHA } from "./policy.mjs";
+import { CI_JOBS, RELEASE_CI_EVENTS, SHA } from "./policy.mjs";
 import { readCi } from "./github.mjs";
 
 const execFileAsync = promisify(execFile);
@@ -93,8 +93,13 @@ export async function readReleaseMetadata({ root, tag, expectedRefSha }) {
 }
 
 export function assertReleaseCi({ run, jobs }, sha) {
-  if (!run || run.head_sha !== sha || run.event !== "push" || run.head_branch !== "main") {
-    throw new Error("release requires CI evidence from a main push at the exact release commit");
+  if (
+    !run ||
+    run.head_sha !== sha ||
+    !RELEASE_CI_EVENTS.has(run.event) ||
+    run.head_branch !== "main"
+  ) {
+    throw new Error("release requires CI evidence from main at the exact release commit");
   }
   if (run.status !== "completed" || run.conclusion !== "success") {
     throw new Error(`release CI is not successful: ${run.conclusion ?? run.status}`);

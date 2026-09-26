@@ -170,7 +170,13 @@ describe("exact-commit CI release gate", () => {
   it("requires all four successful jobs for the exact main-push commit", () => {
     expect(assertReleaseCi(ci(), head)).toMatchObject({ ciRunId: 42, ciRunAttempt: 1 });
     expect(() => assertReleaseCi(ci(), oldHead)).toThrow("exact release commit");
-    expect(() => assertReleaseCi(ci({ event: "pull_request" }), head)).toThrow("main push");
+    expect(() => assertReleaseCi(ci({ event: "pull_request" }), head)).toThrow("from main");
+    expect(assertReleaseCi(ci({ event: "workflow_dispatch" }), head)).toMatchObject({
+      ciRunId: 42,
+    });
+    expect(() =>
+      assertReleaseCi(ci({ event: "workflow_dispatch", head_branch: "sync/upstream" }), head),
+    ).toThrow("from main");
     expect(() => assertReleaseCi({ jobs: [] }, head)).toThrow("evidence");
   });
 
