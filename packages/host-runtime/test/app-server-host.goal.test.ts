@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { FakeHarnessAdapter } from "@codexhost/harness-adapter/testing";
-import type { ExternalHarnessId, JsonObject } from "@codexhost/protocol-core";
+import {
+  CLAUDE_CODE_NATIVE_TRANSPORT_MODEL_ID,
+  type ExternalHarnessId,
+  type JsonObject,
+} from "@codexhost/protocol-core";
 import { harnessIdSchema } from "@codexhost/shared-contracts";
 
 import {
@@ -11,6 +15,7 @@ import {
   writeRequest,
   createFixture,
   startPiThread,
+  startPiTurn,
   stopFixture,
 } from "./app-server-host-fixture.js";
 describe("AppServerHost External Thread Goals", () => {
@@ -241,6 +246,124 @@ describe("AppServerHost External Thread Goals", () => {
       fixture.collector.waitFor((message) => requestId(message, 87)),
     ).resolves.toMatchObject({ result: { goal: { objective, status: "paused" } } });
     expect(session.goalCalls.filter((call) => call === "read").length).toBeLessThanOrEqual(2);
+    await stopFixture(fixture);
+  });
+
+  it("acknowledges Desktop next-Turn settings so Goal setup reaches the Harness", async () => {
+    const adapter = goalAdapter();
+    const fixture = goalFixture(adapter);
+    const threadId = await startPiThread(fixture);
+
+    // Desktop sends this before every composer `thread/goal/set` and aborts
+    // the Goal when it fails.
+    writeRequest(fixture.desktopInput, {
+      id: 100,
+      method: "thread/settings/update",
+      params: { threadId, model: "codexhost/pi-native", effort: "high", summary: "auto" },
+    });
+    await expect(fixture.collector.waitFor((message) => requestId(message, 100))).resolves.toEqual({
+      id: 100,
+      result: {},
+    });
+    writeRequest(fixture.desktopInput, {
+      id: 101,
+      method: "thread/settings/update",
+      params: { threadId, model: CLAUDE_CODE_NATIVE_TRANSPORT_MODEL_ID },
+    });
+    await expect(
+      fixture.collector.waitFor((message) => requestId(message, 101)),
+    ).resolves.toMatchObject({ error: { code: -32602 } });
+    expect(adapter.sessions[0]?.goalCalls ?? []).toEqual([]);
+    await stopFixture(fixture);
+  });
+
+  it("starts a new Thread's Goal from Desktop's `/goal <objective>` first Turn", async () => {
+    const adapter = goalAdapter();
+    const fixture = goalFixture(adapter);
+    const threadId = await startPiThread(fixture);
+
+    writeRequest(fixture.desktopInput, {
+      id: 110,
+      method: "turn/start",
+      params: { threadId, input: [{ type: "text", text: `/goal ${objective}` }] },
+    });
+    const response = await fixture.collector.waitFor((message) => requestId(message, 110));
+    const turnId = ((response.result as JsonObject).turn as JsonObject).id;
+    const active = await waitForGoalUpdate(fixture, "active");
+    expect(messageParams(active)).toMatchObject({ turnId, goal: { objective } });
+    const session = adapter.sessions[0];
+    if (!session) throw new Error("Fake Session was not opened");
+    expect(session.activeGoal?.objective).toBe(objective);
+
+    // Desktop then sets the Goal it already started; that must not restart it.
+    writeRequest(fixture.desktopInput, {
+      id: 111,
+      method: "thread/goal/set",
+      params: { threadId, objective, status: "active" },
+    });
+    await expect(
+      fixture.collector.waitFor((message) => requestId(message, 111)),
+    ).resolves.toMatchObject({ result: { goal: { objective, status: "active" } } });
+    expect(session.goalCalls.filter((call) => call === "set")).toHaveLength(1);
+    session.succeedTurn();
+    await fixture.collector.waitFor((message) =>
+      turnEvent(message, "turn/completed", turnId as string),
+    );
+    await stopFixture(fixture);
+  });
+
+  it("shows a native Goal rejection as a failed Turn and keeps the Thread usable", async () => {
+    const adapter = goalAdapter();
+    const fixture = goalFixture(adapter);
+    const threadId = await startPiThread(fixture);
+    const session = adapter.sessions[0];
+    if (!session) throw new Error("Fake Session was not opened");
+    const reason = "/goal can't run while hooks are restricted (disableAllHooks is set).";
+
+    session.rejectNextTurn({ code: "unsupported", message: reason, retryable: false });
+    writeRequest(fixture.desktopInput, {
+      id: 120,
+      method: "thread/goal/set",
+      params: { threadId, objective, status: "active" },
+    });
+    await expect(
+      fixture.collector.waitFor((message) => requestId(message, 120)),
+    ).resolves.toMatchObject({ error: { code: -32073, message: reason } });
+    // Desktop only toasts "Failed to set goal"; the reason is shown in the Thread.
+    await expect(
+      fixture.collector.waitFor(
+        (message) =>
+          method(message, "turn/completed") &&
+          (messageParams(message).turn as JsonObject).status === "failed",
+      ),
+    ).resolves.toMatchObject({ params: { threadId, turn: { error: { message: reason } } } });
+
+    session.rejectNextTurn({ code: "unsupported", message: reason, retryable: false });
+    writeRequest(fixture.desktopInput, {
+      id: 121,
+      method: "turn/start",
+      params: { threadId, input: [{ type: "text", text: `/goal ${objective}` }] },
+    });
+    const response = await fixture.collector.waitFor((message) => requestId(message, 121));
+    const rejectedTurnId = ((response.result as JsonObject).turn as JsonObject).id as string;
+    await expect(
+      fixture.collector.waitFor((message) => turnEvent(message, "turn/completed", rejectedTurnId)),
+    ).resolves.toMatchObject({
+      params: { turn: { status: "failed", error: { message: reason } } },
+    });
+
+    writeRequest(fixture.desktopInput, {
+      id: 122,
+      method: "thread/goal/get",
+      params: { threadId },
+    });
+    await expect(
+      fixture.collector.waitFor((message) => requestId(message, 122)),
+    ).resolves.toMatchObject({ result: { goal: null } });
+    // Nothing is left running: an ordinary message still starts a Turn.
+    const turnId = await startPiTurn(fixture, threadId, 123);
+    session.succeedTurn();
+    await fixture.collector.waitFor((message) => turnEvent(message, "turn/completed", turnId));
     await stopFixture(fixture);
   });
 

@@ -1,4 +1,9 @@
-import type { HostGoal, HostGoalOutcome, HostUsage } from "@codexhost/harness-adapter";
+import type {
+  HarnessError,
+  HostGoal,
+  HostGoalOutcome,
+  HostUsage,
+} from "@codexhost/harness-adapter";
 import type { JsonObject } from "@codexhost/shared-contracts";
 
 /** Codex app-server `ThreadGoalStatus` values Desktop understands. */
@@ -71,6 +76,26 @@ export function parseThreadGoalSetParams(value: unknown): ThreadGoalSetParams {
     status: status as ThreadGoalStatus | null,
     tokenBudget,
   };
+}
+
+/**
+ * Desktop starts a new Thread's Goal by sending `/goal <objective>` as the
+ * first `turn/start` text before it calls `thread/goal/set`. Returns the
+ * objective for that form; a bare `/goal` or any other text is not a Goal start.
+ */
+export function goalCommandObjective(text: string): string | null {
+  const match = /^\/goal[ \t]+(\S[\s\S]*)$/u.exec(text.trim());
+  return match?.[1]?.trim() || null;
+}
+
+/**
+ * A Goal the Harness refused (or failed to register) is shown as a failed Turn
+ * carrying the native reason: Desktop reports any `thread/goal/set` failure as
+ * a fixed "Failed to set goal" toast. Busy and closed Sessions never started
+ * native work, so they stay request errors only.
+ */
+export function goalFailureIsProjected(error: HarnessError): boolean {
+  return error.code !== "sessionBusy" && error.code !== "invalidState";
 }
 
 export function externalThreadGoalFromHarness(

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   externalThreadGoalFromHarness,
+  goalCommandObjective,
+  goalFailureIsProjected,
   parseThreadGoalSetParams,
   projectThreadGoal,
   settledGoalStatus,
@@ -154,5 +156,28 @@ describe("projectThreadGoal", () => {
       projectThreadGoal({ threadId: "t-1", goal: existingGoal(), usage: null, nowMs: 65_000 })
         .tokensUsed,
     ).toBe(0);
+  });
+});
+
+describe("Desktop Goal commands", () => {
+  it("reads the objective only from Desktop's `/goal <objective>` first Turn", () => {
+    expect(goalCommandObjective(`/goal ${objective}`)).toBe(objective);
+    expect(goalCommandObjective(`  /goal   ${objective}\n`)).toBe(objective);
+    expect(goalCommandObjective("/goal")).toBeNull();
+    expect(goalCommandObjective("/goal   ")).toBeNull();
+    expect(goalCommandObjective("/goals list")).toBeNull();
+    expect(goalCommandObjective(`please /goal ${objective}`)).toBeNull();
+  });
+
+  it("projects native Goal failures but not busy or closed Sessions", () => {
+    const error = (code: "unsupported" | "nativeFailure" | "sessionBusy" | "invalidState") => ({
+      code,
+      message: "x",
+      retryable: false,
+    });
+    expect(goalFailureIsProjected(error("unsupported"))).toBe(true);
+    expect(goalFailureIsProjected(error("nativeFailure"))).toBe(true);
+    expect(goalFailureIsProjected(error("sessionBusy"))).toBe(false);
+    expect(goalFailureIsProjected(error("invalidState"))).toBe(false);
   });
 });

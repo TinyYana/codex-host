@@ -14,6 +14,22 @@ Host SHALL 显式处理指向外部 Thread 的 `thread/goal/set`、`thread/goal/
 - **AND** 响应 SHALL 包含状态为 `active` 的 `ThreadGoal`
 - **AND** Host SHALL 发出携带该 Turn ID 的 `thread/goal/updated`
 
+#### Scenario: Desktop 在设置 Goal 前更新下一 Turn 设置
+- **WHEN** Desktop 对外部 Thread 发送 `thread/settings/update`（每次 composer 设置 Goal 前都会发送，失败即放弃该 Goal）
+- **THEN** Host SHALL 以 `{}` 确认；这些 Codex Turn 设置与 `turn/start` 中的同名字段一样不作用于 Harness
+- **AND** 携带不属于 Codex 或该 Thread Harness 的 Model carrier 时 SHALL 以 `-32602` 失败
+
+#### Scenario: 新 Thread 以 `/goal <objective>` 作为第一个 Turn
+- **WHEN** 暴露 Goal 能力的外部 Thread 收到文本为 `/goal <objective>` 的 `turn/start`
+- **THEN** Host SHALL 通过 Harness Goal 设置起这个 Turn，而不是按普通 command 解析
+- **AND** 随后 Desktop 以同一 objective 发送的 `thread/goal/set` SHALL 在该 Goal Turn 运行时直接返回当前 Goal，MUST NOT 再次调用 Harness
+
+#### Scenario: Harness 拒绝 Goal
+- **WHEN** Harness Goal 设置失败，且原因不是 Session 忙碌或已关闭
+- **THEN** `thread/goal/set` SHALL 以错误响应（Desktop 只显示固定的 "Failed to set goal"）
+- **AND** Host SHALL 再投影一个携带 Harness 原因的失败 Turn；该 Turn 不写入 Mapping Store
+- **AND** 来自 `turn/start` 的 `/goal <objective>` SHALL 返回该失败 Turn 而非请求错误，Thread 之后可正常发送普通消息
+
 #### Scenario: Thread 忙碌时更改 objective
 - **WHEN** 目标 Thread 有活跃 Turn、待处理 steering 或 command
 - **THEN** 带 objective 的 `thread/goal/set` SHALL 以 `-32072` 失败

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   classifyClaudeGoalCommandOutput,
   deriveClaudeGoalFromTranscript,
+  missingGoalAcknowledgement,
 } from "../src/claude-goal.js";
 import { parseClaudeGoalSignal } from "../src/native-message.js";
 
@@ -105,5 +106,18 @@ describe("deriveClaudeGoalFromTranscript", () => {
       ]),
     ).toEqual({ goal: null, outcome: "cleared" });
     expect(deriveClaudeGoalFromTranscript([])).toEqual({ goal: null });
+  });
+});
+
+describe("missingGoalAcknowledgement", () => {
+  it("tells a wedged command apart from one that ended without an acknowledgement", () => {
+    expect(missingGoalAcknowledgement("/goal", true)).toEqual({
+      code: "nativeFailure",
+      message: "Claude Code did not acknowledge /goal within 15s",
+      retryable: true,
+    });
+    expect(missingGoalAcknowledgement("/goal clear", false).message).toBe(
+      "Claude Code finished /goal clear without an acknowledgement",
+    );
   });
 });

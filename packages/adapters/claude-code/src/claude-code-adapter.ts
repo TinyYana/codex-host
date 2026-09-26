@@ -85,7 +85,9 @@ import { claudeTranscriptItemId } from "./item-identity.js";
 import { readClaudeGoalRecords, readClaudeTranscript } from "./claude-transcript.js";
 import {
   CLAUDE_GOAL_OBJECTIVE_LIMIT,
+  GOAL_COMMAND_TIMEOUT_MS,
   classifyClaudeGoalCommandOutput,
+  missingGoalAcknowledgement,
   deriveClaudeGoalFromTranscript,
   type ClaudeGoalCommandOutcome,
   type ClaudeGoalTranscriptState,
@@ -230,7 +232,6 @@ function isTurnScopedEvent(event: HostEvent): boolean {
 }
 
 const claudeCodeHarnessId = harnessIdSchema.parse("claude-code");
-const GOAL_COMMAND_TIMEOUT_MS = 15_000;
 const GOAL_SETTLE_RETRY_DELAYS_MS = [0, 100, 250, 500, 1_000] as const;
 export const claudeCommandCatalog = harnessCommandCatalogSchema.parse({
   commands: [
@@ -2014,6 +2015,7 @@ class ClaudeHarnessSession implements HarnessSession {
   ): Promise<{
     outcome: ClaudeGoalCommandOutcome | null;
     running: Promise<ClaudeTransportTurnResult>;
+    timedOut: boolean;
   }> {
     let timedOut = false;
     let settleCommand: (value: ClaudeGoalCommandOutcome | null) => void = () => undefined;
@@ -2053,7 +2055,7 @@ class ClaudeHarnessSession implements HarnessSession {
         this.#openMode = "resume";
       }
     }
-    return { outcome, running };
+    return { outcome, running, timedOut };
   }
 
   #handleGoalSignal(signal: ClaudeGoalSignal): void {
@@ -2162,7 +2164,7 @@ class ClaudeHarnessSession implements HarnessSession {
     });
     active.deferredEvents = [];
     this.#active = active;
-    const { outcome, running } = await this.#runGoalCommand(transport, () =>
+    const { outcome, running, timedOut } = await this.#runGoalCommand(transport, () =>
       transport.runTurn(`/goal ${objective}`, nativeTurnKey, (event) =>
         this.#handleTurnEvent(active, event),
       ),
@@ -2183,13 +2185,7 @@ class ClaudeHarnessSession implements HarnessSession {
       return {
         ok: false,
         error:
-          outcome?.kind === "error"
-            ? outcome.error
-            : {
-                code: "nativeFailure",
-                message: "Claude Code did not acknowledge the Goal",
-                retryable: true,
-              },
+          outcome?.kind === "error" ? outcome.error : missingGoalAcknowledgement("/goal", timedOut),
       };
     }
     this.#submittedInput = true;
@@ -2233,7 +2229,7 @@ class ClaudeHarnessSession implements HarnessSession {
       if (startingTransport) this.#publishState();
       // A local command only: Claude prints the acknowledgement and ends the
       // native Turn without model work, so nothing is projected to Host.
-      const { outcome, running } = await this.#runGoalCommand(transport, () =>
+      const { outcome, running, timedOut } = await this.#runGoalCommand(transport, () =>
         transport.runTurn("/goal clear", this.#randomUUID(), () => undefined),
       );
       if (outcome) await running.catch(() => undefined);
@@ -2250,11 +2246,7 @@ class ClaudeHarnessSession implements HarnessSession {
         error:
           outcome?.kind === "error"
             ? outcome.error
-            : {
-                code: "nativeFailure",
-                message: "Claude Code did not acknowledge the Goal clear",
-                retryable: true,
-              },
+            : missingGoalAcknowledgement("/goal clear", timedOut),
       };
     } catch (error) {
       return { ok: false, error: startupFailure(error) };

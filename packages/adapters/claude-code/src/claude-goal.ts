@@ -3,6 +3,9 @@ import type { HarnessError, HostGoal, HostGoalOutcome } from "@codexhost/harness
 /** Claude Code caps `/goal` conditions at this many characters. */
 export const CLAUDE_GOAL_OBJECTIVE_LIMIT = 4_000;
 
+/** Claude prints `/goal` acknowledgements before any model work; beyond this the command is wedged. */
+export const GOAL_COMMAND_TIMEOUT_MS = 15_000;
+
 export type ClaudeGoalCommandOutcome =
   | { kind: "set"; objective: string }
   | { kind: "cleared"; objective: string }
@@ -33,6 +36,17 @@ export function classifyClaudeGoalCommandOutput(output: string): ClaudeGoalComma
     return { kind: "error", error: { code: "invalidRequest", message: text, retryable: false } };
   }
   return { kind: "error", error: { code: "unsupported", message: text, retryable: false } };
+}
+
+/** No `/goal` acknowledgement arrived: the command timed out or its native Turn ended silently. */
+export function missingGoalAcknowledgement(command: string, timedOut: boolean): HarnessError {
+  return {
+    code: "nativeFailure",
+    message: timedOut
+      ? `Claude Code did not acknowledge ${command} within ${GOAL_COMMAND_TIMEOUT_MS / 1_000}s`
+      : `Claude Code finished ${command} without an acknowledgement`,
+    retryable: true,
+  };
 }
 
 /**

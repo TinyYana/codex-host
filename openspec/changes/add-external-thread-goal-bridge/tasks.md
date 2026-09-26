@@ -19,4 +19,10 @@
 
 - [x] 4.1 Adapter、历史、Host 聚焦测试（含并发补水、超时、拒绝撤回、Session 级事件放行）。
 - [x] 4.2 `docs/harnesses/claude-code/claude-code-goal.md`、`docs/index.md`、术语表。
-- [ ] 4.3 真实 Desktop 验收（`/goal`、达成自动清除、中断 → Resume、重启后补水）。
+- [x] 4.3 真实 Desktop 验收（新 Thread 与既有 Thread 的 `/goal`、达成自动清除、暂停 → 中断 → Resume、clear、失败后普通消息）；重启后补水与 Desktop 内原生拒绝显示未做真实验收。
+
+## 5. 真实 Desktop 失败修复
+
+- [x] 5.1 `thread/settings/update` 对外部 Thread 确认（原 `-32076` 让 Desktop 在发出 `thread/goal/set` 前放弃）。
+- [x] 5.2 `turn/start` 的 `/goal <objective>` 路由到 Harness Goal；同 objective 的后续 `thread/goal/set` 幂等。
+- [x] 5.3 Harness 拒绝投影为携带原生原因的失败 Turn；缺少回执时区分超时与 Turn 已结束。

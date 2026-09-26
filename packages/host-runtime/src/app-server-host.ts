@@ -26,6 +26,7 @@ import type { Readable, Writable } from "node:stream";
 
 import type {
   HarnessAdapter,
+  HarnessError,
   HarnessGoalCapability,
   HarnessOutput,
   HarnessSession,
@@ -115,6 +116,8 @@ import {
 } from "./external-thread-runtime.js";
 import {
   externalThreadGoalFromHarness,
+  goalCommandObjective,
+  goalFailureIsProjected,
   parseThreadGoalSetParams,
   projectThreadGoal,
   settledGoalStatus,
@@ -420,6 +423,7 @@ const EXPLICIT_EXTERNAL_THREAD_METHODS = new Set([
   "thread/resume",
   "thread/revert",
   "thread/rollback",
+  "thread/settings/update",
   "thread/turns/list",
   "thread/unarchive",
   "thread/unsubscribe",
@@ -492,6 +496,27 @@ function sandboxResult(params: JsonObject): JsonObject {
     excludeTmpdirEnvVar: false,
     excludeSlashTmp: false,
   };
+}
+
+/**
+ * External Turns accept only a Codex or same-Harness Model carrier; other
+ * Desktop turn settings are not Harness configuration. Returns the rejection.
+ */
+function externalModelCarrierError(
+  request: JsonRpcRequest,
+  params: JsonObject,
+  harnessId: string,
+): string | null {
+  if (typeof params.model !== "string") return null;
+  let route: ReturnType<typeof decodeCreateRoute>;
+  try {
+    route = decodeCreateRoute({ id: request.id, method: "thread/start", params });
+  } catch (error) {
+    return errorMessage(error);
+  }
+  return route?.harnessId !== "codex" && route?.harnessId !== harnessId
+    ? "Turn Model carrier does not belong to the Thread Harness"
+    : null;
 }
 
 function turnProjectionGate(): TurnProjectionGate {
@@ -1389,6 +1414,26 @@ export class AppServerHost {
           return;
         }
         await this.#rollbackExternalThread(request, resolution.thread, rollback);
+        return;
+      }
+    }
+    if (request.method === "thread/settings/update") {
+      const params = requestObject(request);
+      const location =
+        typeof params.threadId === "string"
+          ? await this.#locateExternalThread(params.threadId)
+          : ({ kind: "official" } as const);
+      if (await this.#writeResolutionError(request, location)) return;
+      if (location.kind === "external") {
+        // Desktop applies next-Turn settings before `thread/goal/set` and aborts
+        // the Goal on any failure. External Turns ignore these Codex settings
+        // (see `turn/start`), so they are acknowledged after the same carrier check.
+        const carrierError = externalModelCarrierError(request, params, location.record.harnessId);
+        await this.#writer.json(
+          carrierError
+            ? rpcError(request, -32602, carrierError)
+            : rpcEnvelope(request, { result: {} }),
+        );
         return;
       }
     }
@@ -3498,6 +3543,24 @@ export class AppServerHost {
         );
         return;
       }
+      if (
+        current?.objective === params.objective &&
+        current.status === "active" &&
+        this.#externalThreadBusy(thread)
+      ) {
+        // The `/goal <objective>` first Turn already started this Goal; Desktop
+        // sets it again once that Turn is accepted.
+        thread.goal = {
+          ...current,
+          ...(params.tokenBudget !== undefined ? { tokenBudget: params.tokenBudget } : {}),
+          updatedAtMs: Date.now(),
+        };
+        await this.#writer.json(
+          rpcEnvelope(request, { result: { goal: this.#projectExternalGoal(thread) } }),
+        );
+        await this.#writeExternalGoalUpdated(thread);
+        return;
+      }
       await this.#startExternalGoalTurn(request, thread, control, {
         objective: params.objective,
         tokenBudget:
@@ -3554,15 +3617,59 @@ export class AppServerHost {
     control: HarnessGoalCapability,
     input: { objective: string; tokenBudget: number | null; createdAtMs: number },
   ): Promise<void> {
-    if (this.#closeRequested || this.#externalRuntime.get(thread.id) !== thread) {
-      await this.#writer.json(rpcError(request, -32073, "External Thread is no longer available"));
+    const started = await this.#beginExternalGoalTurn(thread, control, input);
+    if (!started.ok) {
+      const rejected = this.#beginRejectedGoalTurn(thread, started.error);
+      try {
+        await this.#writer.json(rpcError(request, started.code, started.error.message));
+      } finally {
+        rejected?.gate.resolve();
+      }
       return;
     }
-    if (this.#externalThreadBusy(thread)) {
+    try {
       await this.#writer.json(
-        rpcError(request, -32072, "External Thread already has an active Turn"),
+        rpcEnvelope(request, { result: { goal: this.#projectExternalGoal(thread) } }),
       );
-      return;
+    } finally {
+      started.gate.resolve();
+    }
+    await this.#writeExternalGoalUpdated(thread);
+  }
+
+  /**
+   * Starts the Harness Goal Turn and records the active Goal. The caller writes
+   * its Desktop response before resolving `gate`.
+   */
+  async #beginExternalGoalTurn(
+    thread: ExternalThread,
+    control: HarnessGoalCapability,
+    input: { objective: string; tokenBudget: number | null; createdAtMs: number },
+  ): Promise<
+    | { ok: true; turnId: HostTurnId; turn: JsonObject; gate: TurnProjectionGate }
+    | { ok: false; code: number; error: HarnessError }
+  > {
+    if (this.#closeRequested || this.#externalRuntime.get(thread.id) !== thread) {
+      return {
+        ok: false,
+        code: -32073,
+        error: {
+          code: "invalidState",
+          message: "External Thread is no longer available",
+          retryable: false,
+        },
+      };
+    }
+    if (this.#externalThreadBusy(thread)) {
+      return {
+        ok: false,
+        code: -32072,
+        error: {
+          code: "sessionBusy",
+          message: "External Thread already has an active Turn",
+          retryable: true,
+        },
+      };
     }
     const turnId = hostTurnIdSchema.parse(randomUUID());
     // The Harness starts the Goal Turn itself; Desktop already shows the
@@ -3595,14 +3702,12 @@ export class AppServerHost {
       thread.projectedTurns.delete(turnId);
       thread.responseGates.delete(turnId);
       gate.resolve();
-      await this.#writer.json(
-        rpcError(
-          request,
-          result.error.code === "invalidRequest" ? -32602 : -32073,
-          result.error.message,
-        ),
-      );
-      return;
+      this.#signalActiveWorkChanged();
+      return {
+        ok: false,
+        code: result.error.code === "invalidRequest" ? -32602 : -32073,
+        error: result.error,
+      };
     }
     const nowMs = Date.now();
     thread.goal = {
@@ -3614,14 +3719,47 @@ export class AppServerHost {
       tokensAtStart: thread.latestUsage?.totalTokens ?? 0,
       nativeCleared: false,
     };
-    try {
-      await this.#writer.json(
-        rpcEnvelope(request, { result: { goal: this.#projectExternalGoal(thread) } }),
-      );
-    } finally {
-      gate.resolve();
-    }
-    await this.#writeExternalGoalUpdated(thread);
+    return { ok: true, turnId, turn: projection.projector.pendingTurn(), gate };
+  }
+
+  /**
+   * Shows a Goal the Harness refused as a failed Turn carrying the native
+   * reason, projected once the caller resolves `gate` after its response.
+   * Nothing is persisted: the Harness owns whether its rejected command
+   * appears in history.
+   */
+  #beginRejectedGoalTurn(
+    thread: ExternalThread,
+    error: HarnessError,
+  ): { turnId: HostTurnId; turn: JsonObject; gate: TurnProjectionGate } | null {
+    if (!goalFailureIsProjected(error) || this.#externalThreadBusy(thread)) return null;
+    const turnId = hostTurnIdSchema.parse(randomUUID());
+    const projection: ProjectedTurn = {
+      projector: new CodexTurnProjector({
+        threadId: thread.id,
+        turnId,
+        cwd: thread.cwd,
+        startedAtMs: Date.now(),
+      }),
+    };
+    const gate = turnProjectionGate();
+    thread.running = true;
+    thread.activeTurnId = turnId;
+    thread.projectedTurns.set(turnId, projection);
+    thread.responseGates.set(turnId, gate);
+    thread.ephemeralTurnIds.add(turnId);
+    void (async () => {
+      await gate.promise;
+      await this.#projectHarnessOutput(thread, {
+        kind: "event",
+        event: { type: "turn.started", turnId },
+      });
+      await this.#projectHarnessOutput(thread, {
+        kind: "event",
+        event: { type: "turn.completed", turnId, outcome: { status: "failed", error } },
+      });
+    })().catch((projectionError) => this.#diagnose(projectionError));
+    return { turnId, turn: projection.projector.pendingTurn(), gate };
   }
 
   async #clearExternalGoal(
@@ -3954,20 +4092,10 @@ export class AppServerHost {
       return;
     }
     const params = requestObject(request);
-    if (typeof params.model === "string") {
-      let route: ReturnType<typeof decodeCreateRoute>;
-      try {
-        route = decodeCreateRoute({ id: request.id, method: "thread/start", params });
-      } catch (error) {
-        await this.#writer.json(rpcError(request, -32602, errorMessage(error)));
-        return;
-      }
-      if (route?.harnessId !== "codex" && route?.harnessId !== thread.harnessId) {
-        await this.#writer.json(
-          rpcError(request, -32602, "Turn Model carrier does not belong to the Thread Harness"),
-        );
-        return;
-      }
+    const carrierError = externalModelCarrierError(request, params, thread.harnessId);
+    if (carrierError) {
+      await this.#writer.json(rpcError(request, -32602, carrierError));
+      return;
     }
     let text: string;
     try {
@@ -4030,6 +4158,12 @@ export class AppServerHost {
     assertActive?: () => void,
   ): Promise<{ turnId: HostTurnId; turn: JsonObject; gate: TurnProjectionGate }> {
     const text = restoreHarnessCommandMentions(inputText);
+    const goalControl = thread.session.goal;
+    const goalObjective = goalControl ? goalCommandObjective(text) : null;
+    if (goalControl && goalObjective !== null) {
+      assertActive?.();
+      return this.#beginExternalGoalInputTurn(thread, goalControl, goalObjective);
+    }
     const commands = thread.session.commands;
     if (!commands || !isExternalCommandCandidate(text)) {
       assertActive?.();
@@ -4059,6 +4193,32 @@ export class AppServerHost {
     } finally {
       this.#pendingExternalCommandRequests.delete(thread.id);
     }
+  }
+
+  /**
+   * Desktop starts a new Thread's Goal as a `/goal <objective>` first Turn and
+   * only then calls `thread/goal/set`, so the Turn goes to the Harness Goal.
+   */
+  async #beginExternalGoalInputTurn(
+    thread: ExternalThread,
+    control: HarnessGoalCapability,
+    objective: string,
+  ): Promise<{ turnId: HostTurnId; turn: JsonObject; gate: TurnProjectionGate }> {
+    const current = thread.goal;
+    const started = await this.#beginExternalGoalTurn(thread, control, {
+      objective,
+      tokenBudget: current?.objective === objective ? current.tokenBudget : null,
+      createdAtMs: current?.objective === objective ? current.createdAtMs : Date.now(),
+    });
+    if (started.ok) {
+      void started.gate.promise
+        .then(() => this.#writeExternalGoalUpdated(thread))
+        .catch((error) => this.#diagnose(error));
+      return { turnId: started.turnId, turn: started.turn, gate: started.gate };
+    }
+    const rejected = this.#beginRejectedGoalTurn(thread, started.error);
+    if (!rejected) throw new ExternalSteerError(started.code, started.error.message);
+    return rejected;
   }
 
   async #beginExternalTurn(
